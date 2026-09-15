@@ -1,20 +1,29 @@
 import { mnemonicToPrivateKey } from '@ton/crypto';
-import { WalletContractV3R2, WalletContractV4, WalletContractV5R1 } from '@ton/ton';
+import { TonClient, WalletContractV2R1, WalletContractV2R2, WalletContractV3R1, WalletContractV3R2, WalletContractV4, WalletContractV5R1 } from '@ton/ton';
 
 async function main() {
     const mnemonic = (process.env.TESTNET_MNEMONIC || '').trim().split(/\s+/);
-    if (mnemonic.length !== 12 && mnemonic.length !== 24) throw new Error('Bad mnemonic length');
     const key = await mnemonicToPrivateKey(mnemonic);
 
-    const v3 = WalletContractV3R2.create({ workchain: 0, publicKey: key.publicKey });
-    const v4 = WalletContractV4.create({ workchain: 0, publicKey: key.publicKey });
-    const v5 = WalletContractV5R1.create({ workchain: 0, publicKey: key.publicKey });
+    const client = new TonClient({
+        endpoint: 'https://testnet.toncenter.com/api/v2/jsonRPC',
+        apiKey: process.env.TONCENTER_API_KEY,
+    });
 
-    console.log('=== Addresses derived from your mnemonic ===');
-    console.log('V3R2:', v3.address.toString({ testOnly: true }));
-    console.log('V4R2:', v4.address.toString({ testOnly: true }));
-    console.log('V5R1:', v5.address.toString({ testOnly: true }));
-    console.log('=== Compare with fauced address: UQC2wpwC3FbdvGwxutm7m6rjtRtBLtQz2gm2VAjL3nGBQrsQ ===');
+    const versions = [
+        { name: 'V2R1', w: WalletContractV2R1.create({ workchain: 0, publicKey: key.publicKey }) },
+        { name: 'V2R2', w: WalletContractV2R2.create({ workchain: 0, publicKey: key.publicKey }) },
+        { name: 'V3R1', w: WalletContractV3R1.create({ workchain: 0, publicKey: key.publicKey }) },
+        { name: 'V3R2', w: WalletContractV3R2.create({ workchain: 0, publicKey: key.publicKey }) },
+        { name: 'V4R2', w: WalletContractV4.create({ workchain: 0, publicKey: key.publicKey }) },
+        { name: 'V5R1', w: WalletContractV5R1.create({ workchain: 0, publicKey: key.publicKey }) },
+    ];
+
+    console.log('=== Target: Gram web testnet wallet 0QBLs2...XU9lr ===');
+    for (const v of versions) {
+        const st = await client.getContractState(v.w.address);
+        console.log(`${v.name}: ${v.w.address.toString({ testOnly: true })} state=${st?.state} balance=${st?.balance ?? 0n}`);
+    }
 }
 
 main().catch(e => { console.error(e); process.exit(1); });
