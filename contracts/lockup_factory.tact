@@ -46,12 +46,13 @@ contract LockupFactory {
         let childAddr: Address = contractAddress(childInit);
 
         send(SendParameters{
-            to: childAddr,
-            value: ton("0.1"),
-            mode: SendPayGasSeparately,
-            init: childInit,
-            body: emptyCell()
-        });
+    to: childAddr,
+    value: ton("0.1"),
+    mode: SendPayGasSeparately,
+    code: childInit.code,
+    data: childInit.data,
+    body: emptyCell()
+});
 
         send(SendParameters{
             to: sender(),
