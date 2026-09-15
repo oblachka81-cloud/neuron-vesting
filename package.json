@@ -1,0 +1,11 @@
+{
+  "name": "neuron-vesting",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "check": "tact --check contracts/lockup_factory.tact && tact --check contracts/lockup_wallet.tact"
+  },
+  "devDependencies": {
+    "@tact-lang/compiler": "latest"
+  }
+}
