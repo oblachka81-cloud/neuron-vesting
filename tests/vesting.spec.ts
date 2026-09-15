@@ -1,7 +1,7 @@
 import { Blockchain, SandboxContract, TreasuryContract } from '@ton/sandbox';
 import { toNano, beginCell, Address } from '@ton/core';
-import { LockupFactory, LockupFactory$JettonNotification, LockupFactory$WithdrawFees } from '../build/LockupFactory_LockupFactory';
-import { LockupWallet, LockupWallet$Claim, LockupWallet$Extend } from '../build/LockupFactory_LockupWallet';
+import { LockupFactory } from '../build/LockupFactory_LockupFactory';
+import { LockupWallet } from '../build/LockupFactory_LockupWallet';
 import '@ton/test-utils';
 
 function makeLockPayload(qid: bigint, jm: Address, ben: Address, creator: Address, unlockAt: bigint) {
