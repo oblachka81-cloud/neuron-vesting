@@ -23,6 +23,7 @@ async function main() {
     for (const v of versions) {
         const st = await client.getContractState(v.w.address);
         console.log(`${v.name}: ${v.w.address.toString({ testOnly: true })} state=${st?.state} balance=${st?.balance ?? 0n}`);
+        await new Promise((r) => setTimeout(r, 500));
     }
 }
 
