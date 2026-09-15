@@ -145,7 +145,13 @@ contract LockupWallet {
     // Plain TON top-ups
     receive() { }
 
-    get fun info(): (Int, Address, Address, Address, Int, Int, Int, Int) {
-        return (self.lock_id, self.jetton_master, self.beneficiary, self.creator, self.total_amount, self.claimed, self.unlock_at, self.created_at);
-    }
+    get fun lockId(): Int { return self.lock_id; }
+    get fun jettonMaster(): Address { return self.jetton_master; }
+    get fun beneficiary(): Address { return self.beneficiary; }
+    get fun creator(): Address { return self.creator; }
+    get fun totalAmount(): Int { return self.total_amount; }
+    get fun claimedAmount(): Int { return self.claimed; }
+    get fun unlockAt(): Int { return self.unlock_at; }
+    get fun createdAt(): Int { return self.created_at; }
+    get fun jettonWallet(): Address? { return self.jetton_wallet; }
 }
