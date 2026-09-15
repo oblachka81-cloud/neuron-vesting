@@ -19,6 +19,9 @@
     "typescript": "^5.6.0",
     "@ton/crypto": "latest",
     "@ton/ton": "latest",
-    "tsx": "latest"
+    "tsx": "latest",
+    "bip39": "latest",
+    "ed25519-hd-key": "latest",
+    "tweetnacl": "latest"
   }
 }
