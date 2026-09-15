@@ -26,4 +26,5 @@ jobs:
       - name: Check wallet versions
         env:
           TESTNET_MNEMONIC: ${{ secrets.TESTNET_MNEMONIC }}
+          TONCENTER_API_KEY: ${{ secrets.TONCENTER_API_KEY }}
         run: npx tsx scripts/check-wallet.ts
