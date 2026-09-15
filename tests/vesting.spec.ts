@@ -12,7 +12,7 @@ describe('NEURON Vesting smoke', () => {
     beforeEach(async () => {
         blockchain = await Blockchain.create();
         deployer = await blockchain.treasury('deployer');
-        factory = blockchain.openContract(LockupFactory.fromInit(deployer.address));
+        factory = blockchain.openContract(await LockupFactory.fromInit(deployer.address));
         const res = await factory.send(deployer.getSender(), { value: toNano('1') }, null);
         expect(res.transactions).toHaveTransaction({
             from: deployer.address,
@@ -46,10 +46,10 @@ describe('NEURON Vesting smoke', () => {
 
         const res = await factory.send(jettonWallet.getSender(), { value: toNano('1') }, {
             $$type: 'JettonNotification',
-            queryId: 1n,
+            query_id: 1n,
             amount: 1_000_000_000n,
             sender: user.address,
-            forwardPayload: payload,
+            forward_payload: payload,
         });
 
         expect(res.transactions).toHaveTransaction({
@@ -62,7 +62,7 @@ describe('NEURON Vesting smoke', () => {
         expect(await factory.getFeeOf(jm.address)).toEqual(5_000_000n);
 
         const wallet = blockchain.openContract(
-            LockupWallet.fromInit(1n, factory.address, jm.address, beneficiary.address, user.address, 995_000_000n, unlockAt)
+            await LockupWallet.fromInit(1n, factory.address, jm.address, beneficiary.address, user.address, 995_000_000n, unlockAt)
         );
         expect(await wallet.getTotalAmount()).toEqual(995_000_000n);
     });
