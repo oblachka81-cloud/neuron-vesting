@@ -16,6 +16,9 @@
     "@types/node": "^22.10.0",
     "jest": "^29.7.0",
     "ts-jest": "^29.2.5",
-    "typescript": "^5.6.0"
+    "typescript": "^5.6.0",
+    "@ton/crypto": "latest",
+    "@ton/ton": "latest",
+    "tsx": "latest"
   }
 }
