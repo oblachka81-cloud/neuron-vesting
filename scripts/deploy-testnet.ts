@@ -1,6 +1,6 @@
 import { mnemonicToPrivateKey } from '@ton/crypto';
 import { TonClient, WalletContractV4, internal } from '@ton/ton';
-import { toNano, contractAddress, beginCell, Address } from '@ton/core';
+import { toNano, contractAddress, beginCell, Address, storeStateInit } from '@ton/core';
 import { LockupFactory } from '../build/LockupFactory_LockupFactory';
 
 async function main() {
@@ -23,17 +23,18 @@ async function main() {
     const stateInit = await LockupFactory.init(treasury);
     const factoryAddress = contractAddress(0, stateInit);
 
+    console.log('Deployer wallet:', walletContract.address.toString({ testOnly: true }));
     console.log('Factory address:', factoryAddress.toString({ testOnly: true }));
 
     if (await client.isContractDeployed(factoryAddress)) {
-        console.log('Already deployed, nothing to do');
+        console.log('Factory already deployed, nothing to do');
         return;
     }
 
-    const seqno = await walletContract.getSeqno();
+    // Signed transfer, seqno 0: wallet is uninitialized, this very message deploys it
     const transfer = await walletContract.createTransfer({
         secretKey: key.secretKey,
-        seqno,
+        seqno: 0,
         messages: [internal({
             to: factoryAddress,
             value: toNano('0.5'),
@@ -41,10 +42,26 @@ async function main() {
             body: beginCell().endCell(),
         })],
     });
-    await walletContract.send(transfer);
+
+    // Wrap into external message WITH wallet stateInit (deploy wallet + send transfer in one)
+    const walletInitCell = beginCell().store(storeStateInit(wallet.init)).endCell();
+
+    const extMsg = beginCell()
+        .storeUint(0b10, 2)
+        .storeUint(0b00, 2)
+        .storeAddress(walletContract.address)
+        .storeCoins(0)
+        .storeBit(1)
+        .storeBit(1)
+        .storeRef(walletInitCell)
+        .storeBit(1)
+        .storeRef(transfer)
+        .endCell();
+
+    await client.sendFile(extMsg.toBoc());
 
     console.log('Deploy transaction sent, waiting...');
-    await new Promise((r) => setTimeout(r, 15000));
+    await new Promise((r) => setTimeout(r, 20000));
 
     if (await client.isContractDeployed(factoryAddress)) {
         console.log('✅ Factory deployed on testnet!');
