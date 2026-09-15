@@ -36,7 +36,8 @@ contract LockupFactory {
             require(known!! == sender(), "wrong wallet");
         }
 
-        self.fees.set(jm, (self.fees.get(jm) ?? 0) + fee);
+        let currentFee: Int? = self.fees.get(jm);
+        self.fees.set(jm, (currentFee != null ? currentFee!! : 0) + fee);
 
         let id: Int = self.next_id;
         self.next_id = id + 1;
@@ -73,9 +74,10 @@ contract LockupFactory {
     // Treasury withdraws accumulated jetton fees
     receive(msg: WithdrawFees) {
         require(sender() == self.treasury, "not treasury");
-        let cur: Int = self.fees.get(msg.jetton_master) ?? 0;
-        require(cur >= msg.amount, "not enough fees");
-        self.fees.set(msg.jetton_master, cur - msg.amount);
+        let cur: Int? = self.fees.get(msg.jetton_master);
+        require(cur != null, "no fees yet");
+        require(cur!! >= msg.amount, "not enough fees");
+        self.fees.set(msg.jetton_master, cur!! - msg.amount);
         let jw: Address = self.own_wallets.get(msg.jetton_master)!!;
         send(SendParameters{
             to: jw,
@@ -96,6 +98,11 @@ contract LockupFactory {
     receive() { }
 
     get fun nextLockId(): Int { return self.next_id; }
-    get fun feeOf(jetton: Address): Int { return self.fees.get(jetton) ?? 0; }
+
+    get fun feeOf(jetton: Address): Int {
+        let f: Int? = self.fees.get(jetton);
+        return f != null ? f!! : 0;
+    }
+
     get fun treasuryAddress(): Address { return self.treasury; }
 }
