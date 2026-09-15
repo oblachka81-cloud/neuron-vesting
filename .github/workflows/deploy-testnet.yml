@@ -1,0 +1,31 @@
+name: Deploy to Testnet
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: Deploy LockupFactory to testnet
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build contracts
+        run: npm run build
+
+      - name: Deploy factory
+        env:
+          TESTNET_MNEMONIC: ${{ secrets.TESTNET_MNEMONIC }}
+          TREASURY_ADDRESS: ${{ vars.TREASURY_ADDRESS }}
+          TONCENTER_API_KEY: ${{ secrets.TONCENTER_API_KEY }}
+        run: npx tsx scripts/deploy-testnet.ts
