@@ -34,13 +34,18 @@ describe('NEURON Vesting smoke', () => {
         const jm = await blockchain.treasury('jettonMaster');
         const unlockAt = BigInt(Math.floor(Date.now() / 1000) + 3600);
 
-        const payload = beginCell()
+        const inner = beginCell()
             .storeUint(0x1, 32)
             .storeUint(7n, 64)
             .storeAddress(jm.address)
             .storeAddress(beneficiary.address)
             .storeAddress(user.address)
             .storeUint(unlockAt, 64)
+            .endCell();
+
+        const payload = beginCell()
+            .storeBit(1)
+            .storeRef(inner)
             .endCell()
             .asSlice();
 
