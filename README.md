@@ -1,5 +1,7 @@
 # NEURON Vesting
 
+[![Build & Test Contracts](https://github.com/oblachka81-cloud/neuron-vesting/actions/workflows/build.yml/badge.svg)](https://github.com/oblachka81-cloud/neuron-vesting/actions/workflows/build.yml)
+
 Token Lock & Vesting platform on TON — lock any TEP-74 jetton with public on-chain proof.
 
 ## What is it
