@@ -68,7 +68,14 @@ contract LockupFactory {
             }.toCell()
         });
 
-        emit(LockCreated{ lock_id: id, creator: creator, beneficiary: ben, jetton: jm, amount: lock_amount, unlock_at: unlock_at });
+        emit(LockCreated{ 
+    lock_id: id, 
+    creator: creator, 
+    beneficiary: ben, 
+    jetton: jm, 
+    amount: lock_amount, 
+    unlock_at: unlock_at 
+}.toCell());
     }
 
     // Treasury withdraws accumulated jetton fees
