@@ -5,7 +5,7 @@ import { LockupFactory } from '../build/LockupFactory_LockupFactory';
 
 async function main() {
     const mnemonic = (process.env.TESTNET_MNEMONIC || '').trim().split(/\s+/);
-    if (mnemonic.length !== 24) throw new Error('TESTNET_MNEMONIC must be 24 words');
+    if (mnemonic.length !== 12 && mnemonic.length !== 24) throw new Error('TESTNET_MNEMONIC must be 12 or 24 words');
     const key = await mnemonicToPrivateKey(mnemonic);
 
     const client = new TonClient({
