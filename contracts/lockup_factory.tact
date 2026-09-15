@@ -1,119 +1,101 @@
-// LockupFactory — singleton factory for NEURON Vesting
-// Deploys LockupWallet instances and collects platform fees
-
+// NEURON Vesting — factory: deploys lockup wallets, collects fees
 import "@stdlib/deploy";
 import "./lockup_wallet";
 
-// Messages
-message(0x1) CreateLock {
-    jetton_master: Address;
-    beneficiary: Address;
-    unlock_at: Int as uint64;
-    query_id: Int as uint64;
-}
-
-message(0x7362d09c) JettonNotification {
-    query_id: Int as uint64;
-    amount: Int as coins;
-    sender: Address;
-    forward_payload: Cell;
-}
-
-message(0x2) DeployLock {
-    jetton_master: Address;
-    beneficiary: Address;
-    total_amount: Int as coins;
-    unlock_at: Int as uint64;
-    creator: Address;
-}
-
-// Constants
-const FEE_BPS: Int = 50; // 0.5% = 50 basis points
-const MIN_LOCK_AMOUNT: Int = 1000000000; // 1 jetton in nano (9 decimals)
-const MAX_LOCK_PERCENT: Int = 10; // max 10% of supply
-
-// Factory contract
-contract LockupFactory with Deployable {
-    lock_id: Int as uint64;
+contract LockupFactory {
+    next_id: Int as uint64;
     treasury: Address;
-    total_fees: Int as coins;
+    fees: map<Address, Int>;
+    own_wallets: map<Address, Address>;
 
     init(treasury: Address) {
-        self.lock_id = 0;
+        self.next_id = 1;
         self.treasury = treasury;
-        self.total_fees = 0;
     }
 
-    // Handle jetton notification from jetton wallet
+    // Jettons arrived with a CreateLock payload
     receive(msg: JettonNotification) {
-        // Parse forward payload as CreateLock
-        let create_lock: CreateLock = msg.forward_payload.parse(
-            (b: Slice) => {
-                let opcode: Int = b.loadUint(32);
-                require(opcode == 0x1, "Invalid opcode");
-                return CreateLock{
-                    jetton_master: b.loadAddress(),
-                    beneficiary: b.loadAddress(),
-                    unlock_at: b.loadUint(64),
-                    query_id: b.loadUint(64)
-                };
-            }
-        );
+        let sc: Slice = msg.forward_payload;
+        require(sc.loadUint(32) == 0x1, "wrong op");
+        let qid: Int = sc.loadUint(64);
+        let jm: Address = sc.loadAddress();
+        let ben: Address = sc.loadAddress();
+        let creator: Address = sc.loadAddress();
+        let unlock_at: Int = sc.loadUint(64);
 
-        // Validate parameters
-        require(msg.amount >= MIN_LOCK_AMOUNT, "Amount too small");
-        require(create_lock.unlock_at > now(), "Unlock must be in the future");
+        require(unlock_at > now(), "past date");
 
-        // Calculate fee
-        let fee: Int = (msg.amount * FEE_BPS) / 10000;
+        let fee: Int = (msg.amount * 50) / 10000;
         let lock_amount: Int = msg.amount - fee;
+        require(lock_amount > 0, "too small");
 
-        // Update state
-        self.lock_id += 1;
-        self.total_fees += fee;
+        let known: Address? = self.own_wallets[jm];
+        if (known == null) {
+            self.own_wallets[jm] = sender();
+        } else {
+            require(known!! == sender(), "wrong wallet");
+        }
 
-        // Deploy LockupWallet
-        let wallet: LockupWallet = contractLockupWallet(self.lock_id);
+        self.fees[jm] = (self.fees[jm] ?? 0) + fee;
+
+        let id: Int = self.next_id;
+        self.next_id = id + 1;
+
+        let childInit: StateInit = initOf LockupWallet(id, myAddress(), jm, ben, creator, lock_amount, unlock_at);
+        let childAddr: Address = contractAddress(childInit);
+
         send(SendParameters{
-            to: wallet,
+            to: childAddr,
             value: ton("0.1"),
             mode: SendPayGasSeparately,
-            body: DeployLock{
-                jetton_master: create_lock.jetton_master,
-                beneficiary: create_lock.beneficiary,
-                total_amount: lock_amount,
-                unlock_at: create_lock.unlock_at,
-                creator: msg.sender
+            init: childInit,
+            body: emptyCell()
+        });
+
+        send(SendParameters{
+            to: sender(),
+            value: ton("0.06"),
+            mode: SendPayGasSeparately,
+            body: JettonTransfer{
+                query_id: qid,
+                amount: lock_amount,
+                destination: childAddr,
+                response_destination: myAddress(),
+                custom_payload: null,
+                forward_ton_amount: 0,
+                forward_payload: emptySlice()
             }.toCell()
         });
 
-        // Send fee to treasury
+        emit(LockCreated{ lock_id: id, creator: creator, beneficiary: ben, jetton: jm, amount: lock_amount, unlock_at: unlock_at });
+    }
+
+    // Treasury withdraws accumulated fees
+    receive(msg: WithdrawFees) {
+        require(sender() == self.treasury, "not treasury");
+        let cur: Int = self.fees[msg.jetton_master] ?? 0;
+        require(cur >= msg.amount, "not enough fees");
+        self.fees[msg.jetton_master] = cur - msg.amount;
+        let jw: Address = self.own_wallets[msg.jetton_master]!!;
         send(SendParameters{
-            to: self.treasury,
-            value: fee,
-            mode: SendPayGasSeparately
+            to: jw,
+            value: ton("0.06"),
+            mode: SendPayGasSeparately,
+            body: JettonTransfer{
+                query_id: msg.query_id,
+                amount: msg.amount,
+                destination: msg.destination_wallet,
+                response_destination: self.treasury,
+                custom_payload: null,
+                forward_ton_amount: 0,
+                forward_payload: emptySlice()
+            }.toCell()
         });
-
-        // Emit event
-        emit LockCreated(
-            self.lock_id,
-            msg.sender,
-            create_lock.beneficiary,
-            create_lock.jetton_master,
-            lock_amount,
-            create_lock.unlock_at
-        );
     }
 
-    // Getters
-    get fun lock_id(): Int {
-        return self.lock_id;
-    }
+    receive() { }
 
-    get fun total_fees(): Int {
-        return self.total_fees;
-    }
+    get fun nextLockId(): Int { return self.next_id; }
+    get fun feeOf(jetton: Address): Int { return self.fees[jetton] ?? 0; }
+    get fun treasuryAddress(): Address { return self.treasury; }
 }
-
-// Events
-event LockCreated(lock_id: Int, creator: Address, beneficiary: Address, jetton: Address, amount: Int, unlock_at: Int);
