@@ -29,6 +29,37 @@ Two Tact contracts:
 
 v2 will add: linear vesting with cliff, multiple beneficiaries, revocable grants.
 
+### 2.5. Forward payload encoding (TEP-74)
+
+Because `CreateLock` (~960 bits: 3 addresses + timestamps) cannot fit inside `JettonNotification.forward_payload` (~1023 bit limit), it MUST be wrapped as:
+
+```tact
+let inner = beginCell()
+    .storeUint(0x1, 32)       // CreateLock op
+    .storeUint(query_id, 64)
+    .storeAddress(jetton_master)
+    .storeAddress(beneficiary)
+    .storeAddress(creator)
+    .storeUint(unlock_at, 64)
+    .endCell();
+
+let forward = beginCell()
+    .storeBit(1)              // "is reference" flag per TEP-74
+    .storeRef(inner)
+    .endCell();
+```
+
+The factory detects the flag and unwraps:
+
+```tact
+let sc: Slice = msg.forward_payload;
+if (sc.loadBit()) {
+    sc = sc.loadRef().beginParse();
+}
+```
+
+This encoding is tested by the sandbox suite and is the **mandatory format** for all frontend integrations.
+
 ## 3. Messages (Tact)
 
 ### LockupFactory
@@ -93,7 +124,7 @@ message(0x178d4519) ReceiveJetton {
 ## 4. Lock Creation Flow
 
 1. User picks jetton, amount, unlock date, beneficiary in the mini app
-2. Frontend builds a `CreateLock` payload and sends a jetton transfer from the user's jetton wallet with `forward_payload = CreateLock`
+2. Frontend builds a `CreateLock` payload, wraps it in a **TEP-74 compliant forward cell** (`storeBit(1)` + `storeRef(CreateLockCell)`) and sends a jetton transfer from the user's jetton wallet with `forward_payload = wrapped`
 3. User's jetton wallet transfers jettons to the factory's jetton wallet with the forward payload
 4. Factory's jetton wallet receives jettons and emits `JettonNotification` to the factory
 5. Factory parses the payload, validates params, takes the fee (0.5%), deploys a new `LockupWallet` and forwards the remaining jettons to it
