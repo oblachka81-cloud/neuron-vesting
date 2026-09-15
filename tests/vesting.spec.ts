@@ -1,7 +1,7 @@
 import { Blockchain, SandboxContract, TreasuryContract } from '@ton/sandbox';
 import { toNano, beginCell } from '@ton/core';
-import { LockupFactory } from '../build/LockupFactory/tact_LockupFactory';
-import { LockupWallet } from '../build/LockupWallet/tact_LockupWallet';
+import { LockupFactory } from '../build/LockupFactory_LockupFactory';
+import { LockupWallet } from '../build/LockupFactory_LockupWallet';
 import '@ton/test-utils';
 
 describe('NEURON Vesting smoke', () => {
