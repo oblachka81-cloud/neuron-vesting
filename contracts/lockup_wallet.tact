@@ -129,7 +129,7 @@ contract LockupWallet {
                 forward_payload: emptySlice()
             }.toCell()
         });
-        emit(Claimed{ lock_id: self.lock_id, amount: available, beneficiary: self.beneficiary });
+        emit(Claimed{ lock_id: self.lock_id, amount: available, beneficiary: self.beneficiary }.toCell());
     }
 
     // Creator can only push the unlock date forward
