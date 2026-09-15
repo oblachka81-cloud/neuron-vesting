@@ -16,6 +16,9 @@ contract LockupFactory {
     // Jettons arrived with a CreateLock payload
     receive(msg: JettonNotification) {
         let sc: Slice = msg.forward_payload;
+        if (sc.loadBit()) {
+            sc = sc.loadRef().beginParse();
+        }
         require(sc.loadUint(32) == 0x1, "wrong op");
         let qid: Int = sc.loadUint(64);
         let jm: Address = sc.loadAddress();
