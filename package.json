@@ -6,6 +6,6 @@
     "check": "tact --check contracts/lockup_factory.tact && tact --check contracts/lockup_wallet.tact"
   },
   "devDependencies": {
-    "@tact-lang/compiler": "latest"
+    "@tact-lang/compiler": "^1.5.0"
   }
 }
