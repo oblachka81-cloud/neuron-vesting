@@ -1,8 +1,24 @@
+import { createHmac } from 'crypto';
 import { mnemonicToPrivateKey } from '@ton/crypto';
 import { TonClient, WalletContractV3R2, WalletContractV4, WalletContractV5R1 } from '@ton/ton';
 import * as bip39 from 'bip39';
-import { getMasterKeyFromSeed, derivePath } from 'ed25519-hd-key';
 import nacl from 'tweetnacl';
+
+const H = 0x80000000;
+
+function slip10Ed25519(seed: Buffer, path: number[]): Buffer {
+    let I = createHmac('sha512', Buffer.from('ed25519 seed')).update(seed).digest();
+    let key = I.subarray(0, 32);
+    let chain = I.subarray(32);
+    for (const idx of path) {
+        const idxBuf = Buffer.from([(idx >>> 24) & 0xff, (idx >>> 16) & 0xff, (idx >>> 8) & 0xff, idx & 0xff]);
+        const data = Buffer.concat([Buffer.from([0x00]), Buffer.from(key), idxBuf]);
+        I = createHmac('sha512', Buffer.from(chain)).update(data).digest();
+        key = I.subarray(0, 32);
+        chain = I.subarray(32);
+    }
+    return Buffer.from(key);
+}
 
 async function main() {
     const words = (process.env.TESTNET_MNEMONIC || '').trim().split(/\s+/);
@@ -23,10 +39,14 @@ async function main() {
 
     if (bip39.validateMnemonic(words.join(' '))) {
         const seed = bip39.mnemonicToSeedSync(words.join(' '));
-        for (const path of ["m/44'/607'/0'/0'/0'", "m/44'/607'/0'"]) {
-            const derived = derivePath(path, getMasterKeyFromSeed(seed).key).key;
-            const kp = nacl.sign.keyPair.fromSeed(Buffer.from(derived));
-            keys.push({ name: `BIP39 ${path}`, publicKey: Buffer.from(kp.publicKey) });
+        const paths: { name: string; p: number[] }[] = [
+            { name: "BIP39 m/44'/607'/0'/0'/0'", p: [44 + H, 607 + H, 0 + H, 0 + H, 0 + H] },
+            { name: "BIP39 m/44'/607'/0'", p: [44 + H, 607 + H, 0 + H] },
+        ];
+        for (const pp of paths) {
+            const priv = slip10Ed25519(seed, pp.p);
+            const kp = nacl.sign.keyPair.fromSeed(priv);
+            keys.push({ name: pp.name, publicKey: Buffer.from(kp.publicKey) });
         }
     } else {
         console.log('Not a valid BIP39 mnemonic');
