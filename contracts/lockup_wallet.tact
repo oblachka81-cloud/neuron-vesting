@@ -139,7 +139,7 @@ contract LockupWallet {
         require(msg.new_unlock_at <= now() + 315360000, "too far");
         let old: Int = self.unlock_at;
         self.unlock_at = msg.new_unlock_at;
-        emit(Extended{ lock_id: self.lock_id, old_unlock_at: old, new_unlock_at: msg.new_unlock_at });
+        emit(Extended{ lock_id: self.lock_id, old_unlock_at: old, new_unlock_at: msg.new_unlock_at }.toCell());
     }
 
     // Plain TON top-ups
