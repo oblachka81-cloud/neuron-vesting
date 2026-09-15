@@ -1,0 +1,14 @@
+{
+  "projects": [
+    {
+      "name": "LockupFactory",
+      "path": "./contracts/lockup_factory.tact",
+      "output": "./build/"
+    },
+    {
+      "name": "LockupWallet",
+      "path": "./contracts/lockup_wallet.tact",
+      "output": "./build/"
+    }
+  ]
+}
