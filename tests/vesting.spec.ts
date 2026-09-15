@@ -100,6 +100,14 @@ describe('NEURON Vesting — full suite', () => {
                 beneficiary.address, user.address, 995_000_000n, unlockAt)
         );
 
+        await wallet.send(fakeJettonWallet.getSender(), { value: toNano('0.1') }, {
+            $$type: 'JettonNotification',
+            query_id: 2n,
+            amount: 995_000_000n,
+            sender: user.address,
+            forward_payload: beginCell().endCell().asSlice(),
+        });
+
         blockchain.now = Number(unlockAt) + 10;
 
         const res = await wallet.send(beneficiary.getSender(), { value: toNano('0.5') },
