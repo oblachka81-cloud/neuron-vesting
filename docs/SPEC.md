@@ -67,10 +67,11 @@ This encoding is tested by the sandbox suite and is the **mandatory format** for
 **`CreateLock`** (from user, embedded as forward payload):
 ```tact
 message(0x1) CreateLock {
+  query_id: Int as uint64;
   jetton_master: Address;
   beneficiary: Address;
+  creator: Address;
   unlock_at: Int as uint64;
-  query_id: Int as uint64;
 }
 ```
 
@@ -80,7 +81,7 @@ message(0x7362d09c) JettonNotification {
   query_id: Int as uint64;
   amount: Int as coins;
   sender: Address;
-  forward_payload: Cell;  // carries CreateLock
+  forward_payload: Slice as remaining;  // carries wrapped CreateLock (see 2.5)
 }
 ```
 
@@ -155,10 +156,10 @@ message(0x178d4519) ReceiveJetton {
 
 ## 7. Platform Fee
 
-- **0.5% of total_amount**, taken at creation
-- Fee is sent to the **treasury wallet** (separate address, multisig in v2)
-- Locks below min amount (100 jettons) are rejected
-- Locks above max (10% of jetton supply) are rejected (anti-abuse sanity check)
+- **0.5% of total_amount** in jettons, taken at creation
+- Fees accumulate in the factory per jetton master and are withdrawn by the treasury via `WithdrawFees` (multisig treasury in v2)
+- Locks with zero or negative post-fee amount are rejected
+- Supply-based caps are enforced off-chain by the indexer catalog policy (v1)
 
 ## 8. Edge Cases & Protections
 
