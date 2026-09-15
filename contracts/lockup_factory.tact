@@ -1,4 +1,4 @@
-// NEURON Vesting — factory: deploys lockup wallets, collects fees
+// NEURON Vesting — factory: deploys lockup wallets, collects platform fees
 import "@stdlib/deploy";
 import "./lockup_wallet";
 
@@ -29,14 +29,14 @@ contract LockupFactory {
         let lock_amount: Int = msg.amount - fee;
         require(lock_amount > 0, "too small");
 
-        let known: Address? = self.own_wallets[jm];
+        let known: Address? = self.own_wallets.get(jm);
         if (known == null) {
-            self.own_wallets[jm] = sender();
+            self.own_wallets.set(jm, sender());
         } else {
             require(known!! == sender(), "wrong wallet");
         }
 
-        self.fees[jm] = (self.fees[jm] ?? 0) + fee;
+        self.fees.set(jm, (self.fees.get(jm) ?? 0) + fee);
 
         let id: Int = self.next_id;
         self.next_id = id + 1;
@@ -70,13 +70,13 @@ contract LockupFactory {
         emit(LockCreated{ lock_id: id, creator: creator, beneficiary: ben, jetton: jm, amount: lock_amount, unlock_at: unlock_at });
     }
 
-    // Treasury withdraws accumulated fees
+    // Treasury withdraws accumulated jetton fees
     receive(msg: WithdrawFees) {
         require(sender() == self.treasury, "not treasury");
-        let cur: Int = self.fees[msg.jetton_master] ?? 0;
+        let cur: Int = self.fees.get(msg.jetton_master) ?? 0;
         require(cur >= msg.amount, "not enough fees");
-        self.fees[msg.jetton_master] = cur - msg.amount;
-        let jw: Address = self.own_wallets[msg.jetton_master]!!;
+        self.fees.set(msg.jetton_master, cur - msg.amount);
+        let jw: Address = self.own_wallets.get(msg.jetton_master)!!;
         send(SendParameters{
             to: jw,
             value: ton("0.06"),
@@ -96,6 +96,6 @@ contract LockupFactory {
     receive() { }
 
     get fun nextLockId(): Int { return self.next_id; }
-    get fun feeOf(jetton: Address): Int { return self.fees[jetton] ?? 0; }
+    get fun feeOf(jetton: Address): Int { return self.fees.get(jetton) ?? 0; }
     get fun treasuryAddress(): Address { return self.treasury; }
 }
