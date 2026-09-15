@@ -26,11 +26,11 @@ jobs:
       - name: Check contracts compile
         run: npm run check
 
-       - name: Build contracts
+      - name: Build contracts
         run: npm run build
 
       - name: List build artifacts
-        run: ls -R build 
+        run: ls -R build
 
-        - name: Run tests
+      - name: Run tests
         run: npm run test
