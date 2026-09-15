@@ -31,3 +31,6 @@ jobs:
 
       - name: List build artifacts
         run: ls -R build 
+
+        - name: Run tests
+        run: npm run test
