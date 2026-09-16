@@ -37,6 +37,7 @@ async function migrate() {
       updated_at TIMESTAMPTZ DEFAULT NOW()
     )`;
   await sql`INSERT INTO indexer_cursor (id, last_lt, last_hash) VALUES (1, 0, NULL) ON CONFLICT (id) DO NOTHING`;
+  await sql`UPDATE indexer_cursor SET last_lt = 0, last_hash = NULL WHERE id = 1 AND (last_hash IS NULL OR LENGTH(last_hash) <> 64)`;
   console.log('Database migrated');
 }
 
