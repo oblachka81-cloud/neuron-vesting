@@ -142,7 +142,7 @@ contract LockupWallet {
     receive(msg: JettonNotification) {
         if (self.jetton_wallet != null) {
             require(sender() == self.jetton_wallet!!, "wrong wallet");
-            return; // verified top-up accepted
+            return;
         }
         if (!self.asked) {
             self.asked = true;
