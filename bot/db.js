@@ -43,11 +43,11 @@ async async function migrate() {
 const big = (v) => BigInt(v ?? 0);
 
 async function getCursor() {
-  const rows = await sql`SELECT last_lt FROM indexer_cursor WHERE id = 1`;
-  return big(rows[0] && rows[0].last_lt);
+  const rows = await sql`SELECT last_lt, last_hash FROM indexer_cursor WHERE id = 1`;
+  return { lt: big(rows[0] && rows[0].last_lt), hash: rows[0] && rows[0].last_hash };
 }
-async function setCursor(lt) {
-  await sql`UPDATE indexer_cursor SET last_lt = ${lt.toString()}, updated_at = NOW() WHERE id = 1`;
+async function setCursor(lt, hash) {
+  await sql`UPDATE indexer_cursor SET last_lt = ${lt.toString()}, last_hash = ${hash}, updated_at = NOW() WHERE id = 1`;
 }
 
 async function insertLock(l) {
