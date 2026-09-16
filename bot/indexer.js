@@ -1,4 +1,6 @@
 // bot/indexer.js — polls factory + lockup wallets, parses events, writes to DB
+BigInt.prototype.toJSON = function () { return this.toString(); };
+
 const { Address, beginCell, storeTransaction } = require('@ton/core');
 const { TonClient } = require('@ton/ton');
 const db = require('./db');
