@@ -116,13 +116,13 @@ contract LockupWallet {
     last_claim: Int as coins;
 
     init(
-        lock_id: Int as uint64,
+        lock_id: Int,
         factory: Address,
         jetton_master: Address,
         beneficiary: Address,
         creator: Address,
-        total_amount: Int as coins,
-        unlock_at: Int as uint64
+        total_amount: Int,
+        unlock_at: Int
     ) {
         self.lock_id = lock_id;
         self.factory = factory;
