@@ -1,4 +1,4 @@
-// NEURON Vesting — factory v2: whitelisted jettons, creator from notification, bounce events
+// NEURON Vesting — factory v2: whitelisted jettons, creator from notification, bounce-safe
 
 import "@stdlib/deploy";
 import "./lockup_wallet";
