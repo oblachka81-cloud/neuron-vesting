@@ -113,6 +113,7 @@ contract LockupWallet {
     created_at: Int as uint64;
     jetton_wallet: Address?;
     asked: Bool;
+    last_claim: Int as coins;
 
     init(
         lock_id: Int as uint64,
@@ -134,6 +135,7 @@ contract LockupWallet {
         self.created_at = now();
         self.jetton_wallet = null;
         self.asked = false;
+        self.last_claim = 0;
     }
 
     // Deposits: never trust notification sender. Ask the master instead.
@@ -171,6 +173,7 @@ contract LockupWallet {
         let available: Int = self.total_amount - self.claimed;
         require(available > 0, "nothing to claim");
         let jw: Address = self.jetton_wallet!!;
+        self.last_claim = available; 
         self.claimed = self.total_amount;
         send(SendParameters{
             to: jw,
