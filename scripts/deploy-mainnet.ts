@@ -4,8 +4,6 @@ import { mnemonicToPrivateKey } from '@ton/crypto';
 import { Address, beginCell, toNano } from '@ton/core';
 import { LockupFactory } from '../build/LockupFactory_LockupFactory';
 
-const { TonClient, WalletContractV4R2, internal } = ton;
-
 const TREASURY = 'UQBniD_M-MTeVqUbWshZrXdQcz0m8lPstG3mQg1AL5KKCGSv';
 const COGNIQ_MASTER = 'EQDOjRZ5rbSnBBvhsv4g0JNN67p89617_2pNc_AO1dTEkaNg';
 
@@ -13,19 +11,31 @@ async function main() {
     const mnemonic = (process.env.MAINNET_MNEMONIC || '').trim();
     if (!mnemonic) throw new Error('MAINNET_MNEMONIC is not set');
 
-    const client = new TonClient({
+    const client = new ton.TonClient({
         endpoint: 'https://toncenter.com/api/v2/jsonRPC',
         apiKey: process.env.TONCENTER_API_KEY || undefined,
     });
 
     const pk = await mnemonicToPrivateKey(mnemonic.split(/\s+/));
 
-    // auto-detect wallet version created by Tonkeeper (v4R2 or v5R1)
-    const candidates: any[] = [WalletContractV4R2.create({ workchain: 0, publicKey: pk.publicKey })];
-    const V5: any = (ton as any).WalletContractV5R1;
-    if (V5) {
-        try { candidates.push(V5.create({ workchain: 0, publicKey: pk.publicKey, network: -239 })); } catch {}
+    // pick whatever wallet class this @ton/ton version actually exports
+    const lib: any = ton as any;
+    const ctorNames = ['WalletContractV5R1', 'WalletContractV4R2', 'WalletContractV4', 'WalletContractV3R2'];
+    const candidates: any[] = [];
+    for (const name of ctorNames) {
+        const C: any = lib[name];
+        if (!C || typeof C.create !== 'function') continue;
+        try {
+            candidates.push(C.create({ workchain: 0, publicKey: pk.publicKey, network: -239 }));
+        } catch {
+            try { candidates.push(C.create({ workchain: 0, publicKey: pk.publicKey })); } catch {}
+        }
     }
+    if (candidates.length === 0) {
+        throw new Error('No wallet class found. Exports with "Wallet": ' +
+            Object.keys(lib).filter((k) => /Wallet/i.test(k)).join(', '));
+    }
+
     let wallet: any = null;
     for (const c of candidates) {
         const b = await client.getBalance(c.address);
@@ -46,7 +56,7 @@ async function main() {
         console.log('Deploying factory...');
         const transfer = await wallet.createTransfer({
             secretKey: pk.secretKey,
-            messages: [internal({
+            messages: [ton.internal({
                 to: factory.address,
                 value: toNano('0.5'),
                 init: factory.init,
