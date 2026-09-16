@@ -210,3 +210,10 @@ All events emitted via `emit`:
 8. Fee of 0.5% arrives to treasury
 9. Repeat partial claim
 10. Attack: create lock with a malformed jetton master
+
+### 13. Testnet deployment (v1)
+
+- Factory address (testnet): `kQAhTRlJwkdR2vYdXz-RowoEGum_ITUZZFj6gdKdSggfjnNh`
+- Treasury: deployer wallet (testnet), multisig in v2
+- Deployer derivation: BIP39 12-word mnemonic + SLIP-0010 ed25519, path m/44'/607'/0', wallet v5r1, networkGlobalId -3
+- Secrets: TESTNET_MNEMONIC, TONCENTER_API_KEY (testnet-only, rotate before any mainnet use)
