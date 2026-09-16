@@ -28,7 +28,7 @@ const txHashOf = (tx) => beginCell().store(storeTransaction(tx)).endCell().hash(
 async function pollFactory() {
   const cursor = await db.getCursor();
   const opts = { limit: 50 };
-  if (cursor > 0n) opts.lt = cursor;
+  if (cursor > 0n) opts.lt = cursor.toString();
   const txs = await client.getTransactions(Address.parse(FACTORY_ADDRESS), opts);
   let maxLt = cursor;
   for (const tx of txs.slice().reverse()) {
