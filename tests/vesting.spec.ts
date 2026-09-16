@@ -4,13 +4,13 @@ import { LockupFactory } from '../build/LockupFactory_LockupFactory';
 import { LockupWallet } from '../build/LockupFactory_LockupWallet';
 import '@ton/test-utils';
 
-function makeLockPayload(qid: bigint, jm: Address, ben: Address, creator: Address, unlockAt: bigint) {
+function makeLockPayload(qid: bigint, jm: Address, ben: Address, unlockAt: bigint) {
+    // v2: 4 fields only (creator comes from msg.sender in notification)
     const inner = beginCell()
         .storeUint(0x1, 32)
         .storeUint(qid, 64)
         .storeAddress(jm)
         .storeAddress(ben)
-        .storeAddress(creator)
         .storeUint(unlockAt, 64)
         .endCell();
     return beginCell().storeBit(1).storeRef(inner).endCell().asSlice();
@@ -26,7 +26,7 @@ function makeJettonNotification(queryId: bigint, amount: bigint, sender: Address
     };
 }
 
-describe('NEURON Vesting — full suite', () => {
+describe('NEURON Vesting — full suite (v2)', () => {
     let blockchain: Blockchain;
     let treasury: SandboxContract<TreasuryContract>;
     let user: SandboxContract<TreasuryContract>;
@@ -47,6 +47,12 @@ describe('NEURON Vesting — full suite', () => {
 
         factory = blockchain.openContract(await LockupFactory.fromInit(treasury.address));
         await factory.send(treasury.getSender(), { value: toNano('2') }, null);
+
+        // v2: whitelist this jetton
+        await factory.send(treasury.getSender(), { value: toNano('0.5') },
+            { $$type: 'SetJettonWallet', query_id: 0n,
+              jetton_master: jettonMaster.address,
+              jetton_wallet: fakeJettonWallet.address });
     });
 
     it('1. deploys factory', async () => {
@@ -55,7 +61,7 @@ describe('NEURON Vesting — full suite', () => {
 
     it('2. creates a lock on jetton notification', async () => {
         const unlockAt = BigInt(Math.floor(Date.now() / 1000) + 3600);
-        const payload = makeLockPayload(1n, jettonMaster.address, beneficiary.address, user.address, unlockAt);
+        const payload = makeLockPayload(1n, jettonMaster.address, beneficiary.address, unlockAt);
 
         const res = await factory.send(fakeJettonWallet.getSender(), { value: toNano('1') },
             makeJettonNotification(1n, 1_000_000_000n, user.address, payload));
@@ -67,10 +73,42 @@ describe('NEURON Vesting — full suite', () => {
         expect(await factory.getFeeOf(jettonMaster.address)).toEqual(5_000_000n);
     });
 
-    it('3. claim before unlock_at -> rejected', async () => {
+    it('3. unapproved jetton -> rejected', async () => {
+        const unknownJetton = await blockchain.treasury('unknownJetton');
+        const unknownWallet = await blockchain.treasury('unknownWallet');
+        
+        await factory.send(treasury.getSender(), { value: toNano('0.5') },
+            { $$type: 'SetJettonWallet', query_id: 0n,
+              jetton_master: unknownJetton.address,
+              jetton_wallet: unknownWallet.address });
+
+        const unlockAt = BigInt(Math.floor(Date.now() / 1000) + 3600);
+        const payload = makeLockPayload(1n, jettonMaster.address, beneficiary.address, unlockAt);
+
+        const res = await factory.send(fakeJettonWallet.getSender(), { value: toNano('1') },
+            makeJettonNotification(1n, 1_000_000_000n, user.address, payload));
+
+        expect(res.transactions).toHaveTransaction({
+            from: fakeJettonWallet.address, to: factory.address, success: false,
+        });
+    });
+
+    it('4. wrong sender (not whitelisted wallet) -> rejected', async () => {
+        const unlockAt = BigInt(Math.floor(Date.now() / 1000) + 3600);
+        const payload = makeLockPayload(1n, jettonMaster.address, beneficiary.address, unlockAt);
+
+        const res = await factory.send(attacker.getSender(), { value: toNano('1') },
+            makeJettonNotification(1n, 1_000_000_000n, user.address, payload));
+
+        expect(res.transactions).toHaveTransaction({
+            from: attacker.address, to: factory.address, success: false,
+        });
+    });
+
+    it('5. claim before unlock_at -> rejected', async () => {
         blockchain.now = Math.floor(Date.now() / 1000) + 60;
         const unlockAt = BigInt(blockchain.now + 3600);
-        const payload = makeLockPayload(1n, jettonMaster.address, beneficiary.address, user.address, unlockAt);
+        const payload = makeLockPayload(1n, jettonMaster.address, beneficiary.address, unlockAt);
 
         await factory.send(fakeJettonWallet.getSender(), { value: toNano('1') },
             makeJettonNotification(1n, 1_000_000_000n, user.address, payload));
@@ -88,9 +126,9 @@ describe('NEURON Vesting — full suite', () => {
         });
     });
 
-    it('4. claim after unlock_at -> ok', async () => {
+    it('6. claim after unlock_at -> ok', async () => {
         const unlockAt = BigInt(Math.floor(Date.now() / 1000) + 100);
-        const payload = makeLockPayload(1n, jettonMaster.address, beneficiary.address, user.address, unlockAt);
+        const payload = makeLockPayload(1n, jettonMaster.address, beneficiary.address, unlockAt);
 
         await factory.send(fakeJettonWallet.getSender(), { value: toNano('1') },
             makeJettonNotification(1n, 1_000_000_000n, user.address, payload));
@@ -122,9 +160,9 @@ describe('NEURON Vesting — full suite', () => {
         });
     });
 
-    it('5. claim by non-beneficiary -> rejected', async () => {
+    it('7. claim by non-beneficiary -> rejected', async () => {
         const unlockAt = BigInt(Math.floor(Date.now() / 1000) + 100);
-        const payload = makeLockPayload(1n, jettonMaster.address, beneficiary.address, user.address, unlockAt);
+        const payload = makeLockPayload(1n, jettonMaster.address, beneficiary.address, unlockAt);
 
         await factory.send(fakeJettonWallet.getSender(), { value: toNano('1') },
             makeJettonNotification(1n, 1_000_000_000n, user.address, payload));
@@ -144,9 +182,9 @@ describe('NEURON Vesting — full suite', () => {
         });
     });
 
-    it('6. extend forward by creator -> ok', async () => {
+    it('8. extend forward by creator -> ok', async () => {
         const unlockAt = BigInt(Math.floor(Date.now() / 1000) + 3600);
-        const payload = makeLockPayload(1n, jettonMaster.address, beneficiary.address, user.address, unlockAt);
+        const payload = makeLockPayload(1n, jettonMaster.address, beneficiary.address, unlockAt);
 
         await factory.send(fakeJettonWallet.getSender(), { value: toNano('1') },
             makeJettonNotification(1n, 1_000_000_000n, user.address, payload));
@@ -166,9 +204,9 @@ describe('NEURON Vesting — full suite', () => {
         expect(await wallet.getUnlockAt()).toEqual(newUnlock);
     });
 
-    it('7. extend into the past -> rejected', async () => {
+    it('9. extend into the past -> rejected', async () => {
         const unlockAt = BigInt(Math.floor(Date.now() / 1000) + 7200);
-        const payload = makeLockPayload(1n, jettonMaster.address, beneficiary.address, user.address, unlockAt);
+        const payload = makeLockPayload(1n, jettonMaster.address, beneficiary.address, unlockAt);
 
         await factory.send(fakeJettonWallet.getSender(), { value: toNano('1') },
             makeJettonNotification(1n, 1_000_000_000n, user.address, payload));
@@ -187,9 +225,9 @@ describe('NEURON Vesting — full suite', () => {
         });
     });
 
-    it('8. extend by non-creator -> rejected', async () => {
+    it('10. extend by non-creator -> rejected', async () => {
         const unlockAt = BigInt(Math.floor(Date.now() / 1000) + 3600);
-        const payload = makeLockPayload(1n, jettonMaster.address, beneficiary.address, user.address, unlockAt);
+        const payload = makeLockPayload(1n, jettonMaster.address, beneficiary.address, unlockAt);
 
         await factory.send(fakeJettonWallet.getSender(), { value: toNano('1') },
             makeJettonNotification(1n, 1_000_000_000n, user.address, payload));
@@ -208,9 +246,9 @@ describe('NEURON Vesting — full suite', () => {
         });
     });
 
-    it('9. withdraw fees by treasury -> ok', async () => {
+    it('11. withdraw fees by treasury -> ok', async () => {
         const unlockAt = BigInt(Math.floor(Date.now() / 1000) + 3600);
-        const payload = makeLockPayload(1n, jettonMaster.address, beneficiary.address, user.address, unlockAt);
+        const payload = makeLockPayload(1n, jettonMaster.address, beneficiary.address, unlockAt);
 
         await factory.send(fakeJettonWallet.getSender(), { value: toNano('1') },
             makeJettonNotification(1n, 1_000_000_000n, user.address, payload));
@@ -229,9 +267,9 @@ describe('NEURON Vesting — full suite', () => {
         expect(await factory.getFeeOf(jettonMaster.address)).toEqual(0n);
     });
 
-    it('10. withdraw fees by non-treasury -> rejected', async () => {
+    it('12. withdraw fees by non-treasury -> rejected', async () => {
         const unlockAt = BigInt(Math.floor(Date.now() / 1000) + 3600);
-        const payload = makeLockPayload(1n, jettonMaster.address, beneficiary.address, user.address, unlockAt);
+        const payload = makeLockPayload(1n, jettonMaster.address, beneficiary.address, unlockAt);
 
         await factory.send(fakeJettonWallet.getSender(), { value: toNano('1') },
             makeJettonNotification(1n, 1_000_000_000n, user.address, payload));
