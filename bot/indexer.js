@@ -1,7 +1,7 @@
 // bot/indexer.js — polls factory + lockup wallets, parses events, writes to DB
 BigInt.prototype.toJSON = function () { return this.toString(); };
 
-const { Address, beginCell, storeTransaction } = require('@ton/core');
+const { Address } = require('@ton/core');
 const { TonClient } = require('@ton/ton');
 const db = require('./db');
 
@@ -23,7 +23,7 @@ function parseEvent(body) {
   return null;
 }
 
-const txHashOf = (tx) => beginCell().store(storeTransaction(tx)).endCell().hash().toString('hex');
+const txHashOf = (tx) => tx.hash().toString('hex');
 
 async function pollFactory() {
   const cursor = await db.getCursor();
