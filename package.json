@@ -7,9 +7,13 @@
     "build": "tact --config tact.config.json",
     "test": "jest"
   },
+  "dependencies": {
+    "@ton/core": "latest",
+    "@ton/ton": "latest",
+    "postgres": "latest"
+  },
   "devDependencies": {
     "@tact-lang/compiler": "^1.5.0",
-    "@ton/core": "latest",
     "@ton/sandbox": "latest",
     "@ton/test-utils": "latest",
     "@types/jest": "^29.5.13",
@@ -18,7 +22,6 @@
     "ts-jest": "^29.2.5",
     "typescript": "^5.6.0",
     "@ton/crypto": "latest",
-    "@ton/ton": "latest",
     "tsx": "latest",
     "bip39": "latest",
     "ed25519-hd-key": "latest",
