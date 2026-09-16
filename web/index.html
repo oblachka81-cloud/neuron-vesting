@@ -7,6 +7,24 @@
     <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
+    <script>
+  function nvBanner(text, color) {
+    var d = document.createElement('pre');
+    d.style.cssText = 'color:' + color + ';background:#111;padding:10px;white-space:pre-wrap;border:1px solid ' + color + ';margin:8px;font-size:12px';
+    d.textContent = text;
+    document.body.prepend(d);
+  }
+  window.addEventListener('error', function (e) {
+    nvBanner('JS ERROR: ' + (e.message || e.type) + ' @ ' + (e.filename || '') + ':' + (e.lineno || ''), '#ff6b6b');
+  });
+  window.addEventListener('unhandledrejection', function (e) {
+    nvBanner('JS REJECTION: ' + ((e.reason && (e.reason.message || e.reason)) || e.type), '#ff6b6b');
+  });
+  setTimeout(function () {
+    var u = document.getElementById('unlockAt') || document.getElementById('unlock-at');
+    if (!u || !u.value) nvBanner('main.ts DID NOT BOOT: date field empty after 3s', '#ffd43b');
+  }, 3000);
+</script>
     <header>
       <h1>🔐 NEURON Vesting</h1>
       <p class="subtitle">Lock any TEP-74 jetton with public on-chain proof · testnet</p>
