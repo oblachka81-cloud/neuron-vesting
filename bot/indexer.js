@@ -27,9 +27,15 @@ const txHashOf = (tx) => beginCell().store(storeTransaction(tx)).endCell().hash(
 
 async function pollFactory() {
   const cursor = await db.getCursor();
-  const opts = { limit: 50 };
+  const opts = { limit: 20, archival: false };
   if (cursor > 0n) opts.lt = cursor.toString();
-  const txs = await client.getTransactions(Address.parse(FACTORY_ADDRESS), opts);
+  let txs = [];
+  try {
+    txs = await client.getTransactions(Address.parse(FACTORY_ADDRESS), opts);
+  } catch (e) {
+    console.error('getTransactions 422 detail:', e.response?.data || e.message);
+    throw e;
+  }
   let maxLt = cursor;
   for (const tx of txs.slice().reverse()) {
     const lt = BigInt(tx.lt);
@@ -42,7 +48,7 @@ async function pollFactory() {
         const ev = parseEvent(msg.body);
         if (ev && ev.type === 'LockCreated') created = ev;
       } else if (msg.info.type === 'internal' && msg.init) {
-        child = msg.info.dest.toString(); // deploy-message of LockupWallet: dest = child address
+        child = msg.info.dest.toString();
       }
     }
     if (created) {
