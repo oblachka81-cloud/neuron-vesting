@@ -80,7 +80,7 @@ form.addEventListener('submit', async (e) => {
     const queryId = BigInt(Date.now());
 
     // Build CreateLock and wrap per TEP-74
-    const createLockCell = buildCreateLockCell(queryId, jettonMaster, beneficiary, creator, unlockAt);
+    const createLockCell = buildCreateLockCell(queryId, jettonMaster, beneficiary, unlockAt);
     const forwardPayload = buildForwardPayload(createLockCell);
 
     // User's jetton wallet address
