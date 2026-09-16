@@ -23,8 +23,9 @@ jobs:
       - name: Build contracts
         run: npm run build
 
-      - name: Check wallet versions
+      - name: Deploy factory
         env:
           TESTNET_MNEMONIC: ${{ secrets.TESTNET_MNEMONIC }}
+          TREASURY_ADDRESS: ${{ vars.TREASURY_ADDRESS }}
           TONCENTER_API_KEY: ${{ secrets.TONCENTER_API_KEY }}
-        run: npx tsx scripts/check-wallet.ts
+        run: npx tsx scripts/deploy-testnet.ts
