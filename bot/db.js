@@ -6,7 +6,7 @@ if (!DATABASE_URL) { console.error('DATABASE_URL is not set'); process.exit(1); 
 
 const sql = postgres(DATABASE_URL, { ssl: 'prefer', max: 5, idle_timeout: 20, connect_timeout: 10 });
 
-async function migrate() {
+async async function migrate() {
   await sql`
     CREATE TABLE IF NOT EXISTS locks (
       lock_id BIGINT PRIMARY KEY,
@@ -33,9 +33,10 @@ async function migrate() {
     CREATE TABLE IF NOT EXISTS indexer_cursor (
       id INT PRIMARY KEY DEFAULT 1,
       last_lt BIGINT NOT NULL DEFAULT 0,
+      last_hash TEXT,
       updated_at TIMESTAMPTZ DEFAULT NOW()
     )`;
-  await sql`INSERT INTO indexer_cursor (id, last_lt) VALUES (1, 0) ON CONFLICT (id) DO NOTHING`;
+  await sql`INSERT INTO indexer_cursor (id, last_lt, last_hash) VALUES (1, 0, NULL) ON CONFLICT (id) DO NOTHING`;
   console.log('Database migrated');
 }
 
