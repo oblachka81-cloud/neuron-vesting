@@ -1,3 +1,4 @@
+import './polyfills';
 import { TonConnectUI } from '@tonconnect/ui';
 import {
   Address, beginCell, toNano, SendMode,
