@@ -1,16 +1,23 @@
-// NEURON Vesting — factory: deploys lockup wallets, collects platform fees
+// NEURON Vesting — factory v2: whitelisted jettons, creator from notification, bounce events
+
 import "@stdlib/deploy";
 import "./lockup_wallet";
 
 contract LockupFactory {
     next_id: Int as uint64;
     treasury: Address;
-    fees: map<Address, Int>;
+    fees: map<Address, Int];
     own_wallets: map<Address, Address>;
 
     init(treasury: Address) {
         self.next_id = 1;
         self.treasury = treasury;
+    }
+
+    // Treasury approves a jetton: registers factory's jetton wallet for this master
+    receive(msg: SetJettonWallet) {
+        require(sender() == self.treasury, "not treasury");
+        self.own_wallets.set(msg.jetton_master, msg.jetton_wallet);
     }
 
     // Jettons arrived with a CreateLock payload
@@ -23,21 +30,20 @@ contract LockupFactory {
         let qid: Int = sc.loadUint(64);
         let jm: Address = sc.loadAddress();
         let ben: Address = sc.loadAddress();
-        let creator: Address = sc.loadAddress();
         let unlock_at: Int = sc.loadUint(64);
-
         require(unlock_at > now(), "past date");
+
+        // v2: only whitelisted jetton, and only from its registered factory wallet
+        let known: Address? = self.own_wallets.get(jm);
+        require(known != null, "jetton not approved");
+        require(known!! == sender(), "wrong wallet");
 
         let fee: Int = (msg.amount * 50) / 10000;
         let lock_amount: Int = msg.amount - fee;
         require(lock_amount > 0, "too small");
 
-        let known: Address? = self.own_wallets.get(jm);
-        if (known == null) {
-            self.own_wallets.set(jm, sender());
-        } else {
-            require(known!! == sender(), "wrong wallet");
-        }
+        // v2: creator = real jetton owner from notification, not a payload field
+        let creator: Address = msg.sender;
 
         let currentFee: Int? = self.fees.get(jm);
         self.fees.set(jm, (currentFee != null ? currentFee!! : 0) + fee);
@@ -45,17 +51,17 @@ contract LockupFactory {
         let id: Int = self.next_id;
         self.next_id = id + 1;
 
-        let childInit: StateInit = initOf LockupWallet(id, myAddress(), jm, ben, creator, lock_amount, unlock_at);
+        let childInit: StateInit = initOfLockupWallet(id, myAddress(), jm, ben, creator, lock_amount, unlock_at);
         let childAddr: Address = contractAddress(childInit);
 
         send(SendParameters{
-    to: childAddr,
-    value: ton("0.1"),
-    mode: SendPayGasSeparately,
-    code: childInit.code,
-    data: childInit.data,
-    body: emptyCell()
-});
+            to: childAddr,
+            value: ton("0.1"),
+            mode: SendPayGasSeparately,
+            code: childInit.code,
+            data: childInit.data,
+            body: emptyCell()
+        });
 
         send(SendParameters{
             to: sender(),
@@ -72,14 +78,14 @@ contract LockupFactory {
             }.toCell()
         });
 
-        emit(LockCreated{ 
-    lock_id: id, 
-    creator: creator, 
-    beneficiary: ben, 
-    jetton: jm, 
-    amount: lock_amount, 
-    unlock_at: unlock_at 
-}.toCell());
+        emit(LockCreated{
+            lock_id: id,
+            creator: creator,
+            beneficiary: ben,
+            jetton: jm,
+            amount: lock_amount,
+            unlock_at: unlock_at
+        }.toCell());
     }
 
     // Treasury withdraws accumulated jetton fees
@@ -106,14 +112,18 @@ contract LockupFactory {
         });
     }
 
+    // Withdraw transfer bounced: conservative — emit event, treasury re-syncs via feeOf
+    bounced(msg: JettonTransfer) {
+        emit(WithdrawBounced{ query_id: msg.query_id, amount: msg.amount }.toCell());
+    }
+
     receive() { }
 
     get fun nextLockId(): Int { return self.next_id; }
-
     get fun feeOf(jetton: Address): Int {
         let f: Int? = self.fees.get(jetton);
         return f != null ? f!! : 0;
     }
-
     get fun treasuryAddress(): Address { return self.treasury; }
+    get fun walletOf(jetton: Address): Address? { return self.own_wallets.get(jetton); }
 }
