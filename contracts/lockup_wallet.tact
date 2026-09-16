@@ -202,10 +202,11 @@ contract LockupWallet {
         emit(Extended{ lock_id: self.lock_id, old_unlock_at: old, new_unlock_at: msg.new_unlock_at }.toCell());
     }
 
-    // Claim transfer bounced: restore balance so beneficiary can retry
-    bounced(msg: JettonTransfer) {
-        self.claimed = self.claimed - msg.amount;
-        emit(ClaimBounced{ lock_id: self.lock_id, amount: msg.amount }.toCell());
+    // Claim transfer bounced: restore from our own field, not from truncated msg
+    bounced(msg: bounced<JettonTransfer>) {
+        self.claimed = self.claimed - self.last_claim;
+        emit(ClaimBounced{ lock_id: self.lock_id, amount: self.last_claim }.toCell());
+        self.last_claim = 0;
     }
 
     // Plain TON top-ups
