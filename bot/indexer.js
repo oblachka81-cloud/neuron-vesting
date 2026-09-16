@@ -28,7 +28,10 @@ const txHashOf = (tx) => beginCell().store(storeTransaction(tx)).endCell().hash(
 async function pollFactory() {
   const cursor = await db.getCursor();
   const opts = { limit: 20, archival: false };
-  if (cursor > 0n) opts.lt = cursor.toString();
+  if (cursor.lt > 0n && cursor.hash) {
+    opts.lt = cursor.lt.toString();
+    opts.hash = cursor.hash;
+  }
   let txs = [];
   try {
     txs = await client.getTransactions(Address.parse(FACTORY_ADDRESS), opts);
@@ -36,11 +39,15 @@ async function pollFactory() {
     console.error('getTransactions 422 detail:', e.response?.data || e.message);
     throw e;
   }
-  let maxLt = cursor;
+  let maxLt = cursor.lt;
+  let maxHash = cursor.hash;
   for (const tx of txs.slice().reverse()) {
     const lt = BigInt(tx.lt);
-    if (cursor > 0n && lt <= cursor) continue;
-    if (lt > maxLt) maxLt = lt;
+    if (cursor.lt > 0n && lt <= cursor.lt) continue;
+    if (lt > maxLt) {
+      maxLt = lt;
+      maxHash = txHashOf(tx);
+    }
     const hash = txHashOf(tx);
     let created = null, child = null;
     for (const msg of tx.outMessages.values()) {
@@ -57,7 +64,7 @@ async function pollFactory() {
       console.log('Indexed LockCreated #' + created.lock_id, '->', child);
     }
   }
-  if (maxLt > cursor) await db.setCursor(maxLt);
+  if (maxLt > cursor.lt) await db.setCursor(maxLt, maxHash);
 }
 
 let tick = 0;
