@@ -127,9 +127,12 @@ form.addEventListener('submit', async (e) => {
   }
 });
 
-// Default unlock: 1 hour from now (в try/catch — FIX #1)
-try {
-  (document.getElementById('unlockAt') as HTMLInputElement).valueAsDate = new Date(Date.now() + 3600 * 1000);
-} catch (e) {
-  console.error('date prefill failed:', e);
+// Default unlock: 1 hour from now (надёжно: прямая строка локального формата)
+function localIso(d: Date): string {
+  const p = (n: number) => String(n).padStart(2, '0');
+  return (
+    d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) +
+    'T' + p(d.getHours()) + ':' + p(d.getMinutes())
+  );
 }
+(document.getElementById('unlockAt') as HTMLInputElement).value = localIso(new Date(Date.now() + 3600 * 1000));
