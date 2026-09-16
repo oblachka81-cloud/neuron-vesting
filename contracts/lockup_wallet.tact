@@ -173,7 +173,7 @@ contract LockupWallet {
         let available: Int = self.total_amount - self.claimed;
         require(available > 0, "nothing to claim");
         let jw: Address = self.jetton_wallet!!;
-        self.last_claim = available; 
+        self.last_claim = available;
         self.claimed = self.total_amount;
         send(SendParameters{
             to: jw,
