@@ -13,7 +13,7 @@
     "postgres": "latest"
   },
   "devDependencies": {
-    "@tact-lang/compiler": "^1.5.0",
+    "@tact-lang/compiler": "^1.5.4",
     "@ton/sandbox": "latest",
     "@ton/test-utils": "latest",
     "@types/jest": "^29.5.13",
