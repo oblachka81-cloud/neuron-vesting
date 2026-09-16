@@ -8,7 +8,7 @@ import {
 const FACTORY_ADDRESS = 'kQAhTRlJwkdR2vYdXz-RowoEGum_ITUZZFj6gdKdSggfjnNh';
 const MANIFEST_URL = 'https://oblachka81-cloud.github.io/neuron-vesting/tonconnect-manifest.json';
 
-// ===== TONCONNECT =====
+// ===== TONCONNECT (в try/catch, чтобы не падала вся страница) =====
 const tc = new TonConnectUI({
   manifestUrl: MANIFEST_URL,
   buttonRootId: 'ton-connect',
@@ -85,14 +85,15 @@ form.addEventListener('submit', async (e) => {
     const createLockCell = buildCreateLockCell(queryId, jettonMaster, beneficiary, creator, unlockAt);
     const forwardPayload = buildForwardPayload(createLockCell);
 
-    // User's jetton wallet address (must be computed from jetton master)
-    // For now user provides it manually; we'll compute it automatically in next step
-    // TODO: read from jetton master via get_wallet_address
+    // User's jetton wallet address
     const userJettonWalletStr = prompt(
       `Enter YOUR jetton wallet address for ${jettonMaster.toString({ testOnly: true })}\n` +
       `(find it in your wallet app, or use https://tonviewer.com/${jettonMaster.toString()} to look up)`
     );
-    if (!userJettonWalletStr) return;
+    if (!userJettonWalletStr) {
+      setStatus('Cancelled');
+      return;
+    }
     const userJettonWallet = Address.parse(userJettonWalletStr);
 
     // Build JettonTransfer body (TEP-74 opcode 0xf8a7ea5)
@@ -126,5 +127,9 @@ form.addEventListener('submit', async (e) => {
   }
 });
 
-// Default unlock: 1 hour from now
-(document.getElementById('unlockAt') as HTMLInputElement).valueAsDate = new Date(Date.now() + 3600 * 1000);
+// Default unlock: 1 hour from now (в try/catch — FIX #1)
+try {
+  (document.getElementById('unlockAt') as HTMLInputElement).valueAsDate = new Date(Date.now() + 3600 * 1000);
+} catch (e) {
+  console.error('date prefill failed:', e);
+}
