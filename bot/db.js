@@ -52,7 +52,16 @@ async function setCursor(lt) {
 async function insertLock(l) {
   await sql`
     INSERT INTO locks (lock_id, creator, beneficiary, jetton_master, amount, unlock_at, lockup_wallet, factory)
-    VALUES (${String(l.lock_id)}, ${l.creator}, ${l.beneficiary}, ${l.jetton_master}, ${l.amount}, ${String(l.unlock_at)}, ${l.lockup_wallet}, ${l.factory})
+    VALUES (
+      ${String(l.lock_id)},
+      ${String(l.creator)},
+      ${String(l.beneficiary)},
+      ${String(l.jetton_master)},
+      ${String(l.amount)},
+      ${String(l.unlock_at)},
+      ${String(l.lockup_wallet)},
+      ${String(l.factory)}
+    )
     ON CONFLICT (lock_id) DO NOTHING`;
 }
 async function markClaimed(lockId, amount) {
