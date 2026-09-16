@@ -40,15 +40,13 @@ function buildCreateLockCell(
   queryId: bigint,
   jettonMaster: Address,
   beneficiary: Address,
-  creator: Address,
   unlockAt: bigint
 ) {
   return beginCell()
-    .storeUint(0x1, 32)               // CreateLock op
+    .storeUint(0x1, 32)
     .storeUint(queryId, 64)
     .storeAddress(jettonMaster)
     .storeAddress(beneficiary)
-    .storeAddress(creator)
     .storeUint(unlockAt, 64)
     .endCell();
 }
