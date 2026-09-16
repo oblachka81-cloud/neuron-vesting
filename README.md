@@ -21,6 +21,13 @@ Two Tact contracts:
 
 See the full contract specification in [`docs/SPEC.md`](docs/SPEC.md).
 
+## Testnet deployment (v1)
+
+- **LockupFactory:** `kQAhTRlJwkdR2vYdXz-RowoEGum_ITUZZFj6gdKdSggfjnNh`
+- **Explorer:** [testnet.tonviewer.com/kQAhTRlJwkdR2vYdXz-RowoEGum_ITUZZFj6gdKdSggfjnNh](https://testnet.tonviewer.com/kQAhTRlJwkdR2vYdXz-RowoEGum_ITUZZFj6gdKdSggfjnNh)
+- **Deploy pipeline:** GitHub Actions, workflow `Deploy to Testnet` (workflow_dispatch)
+- **CI:** build + 10 sandbox tests on every push
+
 ## Tech stack
 
 - **Contracts:** [Tact](https://tact-lang.org/) on TON
