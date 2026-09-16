@@ -6,7 +6,7 @@ import "./lockup_wallet";
 contract LockupFactory {
     next_id: Int as uint64;
     treasury: Address;
-    fees: map<Address, Int];
+    fees: map<Address, Int>;
     own_wallets: map<Address, Address>;
 
     init(treasury: Address) {
