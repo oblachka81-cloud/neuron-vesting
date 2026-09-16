@@ -8,10 +8,14 @@ contract LockupFactory {
     treasury: Address;
     fees: map<Address, Int>;
     own_wallets: map<Address, Address>;
+    pending_withdraw: Int as coins;
+    pending_jetton: Address?;
 
     init(treasury: Address) {
         self.next_id = 1;
         self.treasury = treasury;
+        self.pending_withdraw = 0;
+        self.pending_jetton = null;
     }
 
     // Treasury approves a jetton: registers factory's jetton wallet for this master
@@ -95,6 +99,8 @@ contract LockupFactory {
         require(cur != null, "no fees yet");
         require(cur!! >= msg.amount, "not enough fees");
         self.fees.set(msg.jetton_master, cur!! - msg.amount);
+        self.pending_withdraw = msg.amount;
+        self.pending_jetton = msg.jetton_master;
         let jw: Address = self.own_wallets.get(msg.jetton_master)!!;
         send(SendParameters{
             to: jw,
@@ -112,9 +118,16 @@ contract LockupFactory {
         });
     }
 
-    // Withdraw transfer bounced: conservative — emit event, treasury re-syncs via feeOf
-    bounced(msg: JettonTransfer) {
-        emit(WithdrawBounced{ query_id: msg.query_id, amount: msg.amount }.toCell());
+    // Withdraw transfer bounced: restore fee balance from our own fields
+    bounced(msg: bounced<JettonTransfer>) {
+        if (self.pending_jetton != null) {
+            let jm: Address = self.pending_jetton!!;
+            let cur: Int? = self.fees.get(jm);
+            self.fees.set(jm, (cur != null ? cur!! : 0) + self.pending_withdraw);
+            emit(WithdrawBounced{ query_id: 0, amount: self.pending_withdraw }.toCell());
+            self.pending_withdraw = 0;
+            self.pending_jetton = null;
+        }
     }
 
     receive() { }
