@@ -1,11 +1,26 @@
-// bot/index.cjs — NEURON Vesting Telegram bot (zero dependencies, long polling)
+// bot/index.cjs — NEURON Vesting bot + HTTP server (zero deps, long polling)
+const http = require('http');
 const TOKEN = (process.env.BOT_TOKEN || '').trim();
 if (!TOKEN) { console.error('BOT_TOKEN is not set'); process.exit(1); }
 
 const API = 'https://api.telegram.org/bot' + TOKEN;
 const FACTORY = process.env.FACTORY_ADDRESS || 'kQAhTRlJwkdR2vYdXz-RowoEGum_ITUZZFj6gdKdSggfjnNh';
 const MINI_APP_URL = process.env.MINI_APP_URL || 'https://github.com/oblachka81-cloud/neuron-vesting';
+const PORT = parseInt(process.env.PORT || '3000', 10);
 
+// ===== HTTP-сервер (для Bothost healthcheck и будущего мини-аппа) =====
+const server = http.createServer((req, res) => {
+  if (req.url === '/health') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ok: true, bot: 'NEURON Vesting', factory: FACTORY }));
+    return;
+  }
+  res.writeHead(302, { Location: MINI_APP_URL });
+  res.end();
+});
+server.listen(PORT, () => console.log(`HTTP server on port ${PORT}`));
+
+// ===== Telegram bot (long polling) =====
 let offset = 0;
 
 async function call(method, params) {
@@ -22,7 +37,7 @@ async function call(method, params) {
 function menuKeyboard() {
   return {
     inline_keyboard: [
-      [{ text: 'Открыть NEURON Vesting', url: MINI_APP_URL }],
+      [{ text: 'Открыть NEURON Vesting', web_app: { url: MINI_APP_URL } }],
       [{ text: 'Статус фабрики', callback_data: 'status' }],
     ],
   };
@@ -70,6 +85,6 @@ async function loop() {
 }
 
 call('deleteWebhook', {}).then(() => {
-  console.log('NEURON Vesting bot is up (long polling)');
+  console.log('NEURON Vesting bot is up (long polling + HTTP)');
   loop();
 });
