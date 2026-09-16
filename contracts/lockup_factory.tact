@@ -55,7 +55,7 @@ contract LockupFactory {
         let id: Int = self.next_id;
         self.next_id = id + 1;
 
-        let childInit: StateInit = initOfLockupWallet(id, myAddress(), jm, ben, creator, lock_amount, unlock_at);
+        let childInit: StateInit = initOf LockupWallet(id, myAddress(), jm, ben, creator, lock_amount, unlock_at);
         let childAddr: Address = contractAddress(childInit);
 
         send(SendParameters{
