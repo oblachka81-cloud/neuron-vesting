@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>NEURON Vesting — Testnet</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <header>
+      <h1>🔐 NEURON Vesting</h1>
+      <p class="subtitle">Lock any TEP-74 jetton with public on-chain proof · testnet</p>
+      <div id="ton-connect"></div>
+    </header>
+
+    <main>
+      <section class="card" id="factory-status">
+        <h2>Factory</h2>
+        <code>kQAhTRlJwkdR2vYdXz-RowoEGum_ITUZZFj6gdKdSggfjnNh</code>
+        <p class="hint">
+          <a href="https://testnet.tonviewer.com/kQAhTRlJwkdR2vYdXz-RowoEGum_ITUZZFj6gdKdSggfjnNh" target="_blank" rel="noopener">
+            open in explorer ↗
+          </a>
+        </p>
+      </section>
+
+      <section class="card" id="create-lock">
+        <h2>Create a Lock</h2>
+        <form id="lock-form">
+          <label>
+            Jetton master (TEP-74, testnet)
+            <input id="jetton-master" type="text" placeholder="kQ..." required />
+          </label>
+          <label>
+            Amount (jettons, NOT nano)
+            <input id="amount" type="number" min="0.01" step="0.01" value="10" required />
+          </label>
+          <label>
+            Beneficiary address
+            <input id="beneficiary" type="text" placeholder="kQ..." required />
+          </label>
+          <label>
+            Unlock date &amp; time (UTC)
+            <input id="unlockAt" type="datetime-local" required />
+          </label>
+          <button type="submit" id="submit-btn" disabled>Connect wallet first</button>
+          <p id="status" class="status"></p>
+        </form>
+      </section>
+
+      <section class="card" id="how-it-works">
+        <h2>How it works</h2>
+        <ol>
+          <li>You approve a JettonTransfer from <b>your</b> jetton wallet to the factory</li>
+          <li>Payload carries <code>CreateLock</code> (TEP-74, bit 1 + ref)</li>
+          <li>Factory takes 0.5% fee, deploys a new <b>LockupWallet</b> for you</li>
+          <li>After <code>unlock_at</code>, beneficiary taps Claim → jettons arrive</li>
+        </ol>
+      </section>
+    </main>
+
+    <footer>
+      <a href="https://github.com/oblachka81-cloud/neuron-vesting" target="_blank" rel="noopener">source on GitHub</a>
+    </footer>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
