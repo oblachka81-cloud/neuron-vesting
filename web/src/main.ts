@@ -5,7 +5,7 @@ import {
 
 // ===== CONFIG =====
 const FACTORY_ADDRESS = 'kQAhTRlJwkdR2vYdXz-RowoEGum_ITUZZFj6gdKdSggfjnNh';
-const MANIFEST_URL = 'https://raw.githubusercontent.com/oblachka81-cloud/neuron-vesting/main/web/public/tonconnect-manifest.json';
+const MANIFEST_URL = 'https://oblachka81-cloud.github.io/neuron-vesting/tonconnect-manifest.json';
 
 // ===== TONCONNECT =====
 const tc = new TonConnectUI({
