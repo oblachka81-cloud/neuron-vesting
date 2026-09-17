@@ -1,219 +1,398 @@
-# NEURON Vesting v1 — Contract Specification
+# NEURON Vesting — Contract Specification
 
-## 1. Architecture
+**Version:** v2.5.1 (factory) / v2.6.1 (wallet)
+**Status:** Internal review passed · 55 sandbox tests green · external audit planned before third-party onboarding
+**Language:** Tact 1.5.4
 
-Two Tact contracts:
+---
 
-- **`LockupFactory`** (singleton, deployed once)
-  - Accepts lock creation requests
-  - Deploys per-user `LockupWallet` instances
-  - Keeps a registry of all locks (for the indexer)
-  - Collects platform fees
+## Table of contents
 
-- **`LockupWallet`** (one per lock)
-  - Holds the locked jettons
-  - Stores lock params: jetton, amount, beneficiary, unlock schedule
-  - Allows claims only by the beneficiary and only for vested amounts
-  - Non-revocable by design — that is the whole point
+1. Overview
+2. Contract: `LockupFactory`
+3. Contract: `LockupWallet`
+4. Message types
+5. Events
+6. Constants
+7. Invariants
+8. Known limitations
+9. Trust model
+10. Sequence diagrams
 
-## 2. Lock Parameters (v1 — simple)
+---
 
-| Parameter | Type | Description |
-|---|---|---|
-| `jetton_master` | `Address` | TEP-74 jetton master address |
-| `total_amount` | `Int` | Total locked amount in nano-jettons |
-| `beneficiary` | `Address` | Address allowed to claim |
-| `unlock_at` | `Int` | Unix timestamp of full unlock |
-| `created_at` | `Int` | Unix timestamp of creation |
-| `claimed` | `Int` | Already claimed, in nano-jettons |
+## 1. Overview
 
-v2 will add: linear vesting with cliff, multiple beneficiaries, revocable grants.
+NEURON Vesting is a **non-custodial** token lockup system on TON. Users lock TEP-74 jettons with a transparent, immutable schedule. Locked tokens cannot be withdrawn until the unlock date.
 
-### 2.5. Forward payload encoding (TEP-74)
+### Components
 
-Because `CreateLock` (~960 bits: 3 addresses + timestamps) cannot fit inside `JettonNotification.forward_payload` (~1023 bit limit), it MUST be wrapped as:
+- **`LockupFactory`** — singleton. Receives jetton transfers, deploys `LockupWallet` instances, forwards jettons, accumulates fees.
+- **`LockupWallet`** — one per lock. Holds jettons, enforces schedule, releases to beneficiary.
+- **`messages.tact`** — shared TEP-74 message declarations.
 
-```tact
-let inner = beginCell()
-    .storeUint(0x1, 32)       // CreateLock op
-    .storeUint(query_id, 64)
-    .storeAddress(jetton_master)
-    .storeAddress(beneficiary)
-    .storeAddress(creator)
-    .storeUint(unlock_at, 64)
-    .endCell();
+---
 
-let forward = beginCell()
-    .storeBit(1)              // "is reference" flag per TEP-74
-    .storeRef(inner)
-    .endCell();
+## 2. Contract: `LockupFactory`
+
+### State
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `next_id` | `Int as uint64` | Monotonic lock counter, starts at 1 |
+| `treasury` | `Address` | Platform treasury (fee recipient, whitelist authority) |
+| `own_wallets` | `map<Address, Address>` | `jetton_master → factory jetton wallet` |
+| `wallet_to_master` | `map<Address, Address>` | `factory jetton wallet → jetton_master` |
+| `fees` | `map<Address, Int>` | `jetton_master → accumulated jetton fee` |
+| `ton_fees` | `Int as coins` | Accumulated TON platform fees |
+| `pending_withdraw` | `map<Int, Int>` | `query_id → pending jetton fee withdrawal amount` |
+| `pending_jetton` | `map<Int, Address>` | `query_id → pending jetton master` |
+| `used_qids` | `map<Int, Bool>` | Monotonic query_id registry |
+| `pending_create` | `map<Int, Address>` | `lock_id → child LockupWallet address` |
+| `create_creator` | `map<Int, Address>` | `lock_id → creator` |
+| `create_amount` | `map<Int, Int>` | `lock_id → locked amount` |
+| `create_beneficiary` | `map<Int, Address>` | `lock_id → beneficiary` |
+| `create_jetton` | `map<Int, Address>` | `lock_id → jetton master` |
+
+### Receivers
+
+#### `SetJettonWallet` (treasury only)
+
+Registers a factory-owned jetton wallet for a given master.
+
+**Preconditions:**
+- `sender() == treasury`
+- `query_id > 0`
+- `own_wallets[jetton_master]` is unset OR equals `jetton_wallet`
+
+**Effects:**
+- `own_wallets[jetton_master] = jetton_wallet`
+- `wallet_to_master[jetton_wallet] = jetton_master`
+- Emits `JettonWalletSet`
+
+**Security:** off-chain verifier (`scripts/verify-jetton-wallets.ts`) validates the address against the master's `get_wallet_address` before the call.
+
+#### `JettonNotification` (any user, via whitelisted jetton wallet)
+
+Main entry point for lock creation.
+
+**Preconditions:**
+1. `wallet_to_master[sender()] != null`
+2. `own_wallets[jetton_master] != null`
+3. `context().value >= 1.25 TON`
+4. `forward_payload` parses as `CreateLock` and matches the master
+5. `unlock_at > now()` and `unlock_at <= now() + 10 years`
+6. `query_id > 0`
+7. `lock_amount = amount - 0.5% fee > 0`
+8. `creator != myAddress()`
+
+**Effects:**
+- Charges `ton_fees += 1 TON`, refunds overpay to `msg.sender`
+- `fees[jetton_master] += 0.5% * amount`
+- Deploys `LockupWallet` with `total_amount = amount - fee`
+- Forwards jettons to `LockupWallet`
+- Records `pending_create`, `create_*` for bounce recovery
+- Emits `LockCreated`, `TonFeeCollected`
+
+#### `WithdrawFees` (treasury only)
+
+**Preconditions:** `sender() == treasury`, `query_id > 0`, qid not used, `fees[jetton_master] >= amount > 0`
+
+**Effects:** reserves `query_id`, deducts `fees`, sends `JettonTransfer` to `destination_wallet`. On bounce: restores `fees`, emits `WithdrawBounced`.
+
+#### `WithdrawTonFees` (treasury only)
+
+**Preconditions:** `sender() == treasury`, `query_id > 0`, qid not used, `amount > 0`, `ton_fees >= amount`
+
+**Effects:** reserves `query_id`, deducts `ton_fees`, sends TON to `destination`. Emits `TonFeesWithdrawn`.
+
+#### `bounced<JettonTransfer>`
+
+Handles two cases, disambiguated by `query_id` namespace:
+- **Create-transfer bounce** — matches `pending_create[qid]`: verifies sender is the expected jetton wallet, refunds jettons to creator, emits `CreateBounced` + `LockCreationFailed`, clears pending maps.
+- **Fee-withdrawal bounce** — matches `pending_withdraw[qid]`: verifies sender, restores `fees[master]`, emits `WithdrawBounced`, clears pending maps.
+
+#### `receive()` — plain TON top-ups accepted.
+
+### Getters
+
+| Getter | Returns |
+|--------|---------|
+| `nextLockId()` | `next_id` |
+| `treasuryAddress()` | `treasury` |
+| `feeOf(jetton)` | `fees[jetton]` or 0 |
+| `tonFees()` | `ton_fees` |
+| `walletOf(jetton)` | `own_wallets[jetton]` |
+| `masterOf(wallet)` | `wallet_to_master[wallet]` |
+| `isWalletSet(jetton)` | whether master is whitelisted |
+| `isQueryIdUsed(qid)` | whether qid was used |
+| `pendingWithdrawOf(qid)` | pending jetton amount |
+| `pendingJettonOf(qid)` | pending jetton master |
+| `pendingCreateOf(lockId)` | pending child address |
+| `createJettonOf(lockId)` | pending jetton master |
+
+---
+
+## 3. Contract: `LockupWallet`
+
+### State
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `lock_id` | `Int as uint64` | Unique lock id |
+| `factory` | `Address` | Factory that deployed this wallet |
+| `jetton_master` | `Address` | Jetton master of locked tokens |
+| `jetton_wallet` | `Address` | This wallet's jetton wallet address (provided at deploy) |
+| `beneficiary` | `Address` | Who can claim after unlock |
+| `creator` | `Address` | Original jetton owner; can extend |
+| `total_amount` | `Int as coins` | Locked amount (immutable) |
+| `claimed` | `Int as coins` | Amount claimed so far |
+| `unlock_at` | `Int as uint64` | Unix timestamp when claim becomes available |
+| `created_at` | `Int as uint64` | Deploy timestamp |
+| `last_claim` | `Int as coins` | Amount of in-flight claim |
+| `pending_claim` | `Bool` | True while a claim transfer is in-flight |
+| `pending_since` | `Int as uint64` | Timestamp of pending claim start |
+| `pending_query_id` | `Int as uint64` | Query id of the in-flight claim |
+| `funded` | `Bool` | True after first correct-amount deposit |
+
+### Receivers
+
+#### `JettonNotification`
+
+**Preconditions:** `sender() == jetton_wallet`
+
+**Effects:** if `!funded && amount == total_amount` → `funded = true`, emits `LockFunded`. Otherwise emits `UnexpectedDeposit` (deposit accepted but ignored).
+
+#### `Claim`
+
+**Preconditions:**
+1. `sender() == beneficiary`
+2. `funded == true`
+3. `now() >= unlock_at`
+4. `!pending_claim`
+5. `query_id > 0`
+6. `available > 0`
+7. `want > 0` (`msg.amount == 0` means full claim)
+8. `want <= available`
+
+**Effects:** updates `last_claim`, `claimed`, `pending_*`. Sends `JettonTransfer` via `jetton_wallet` targeting beneficiary. Emits `Claimed`. On bounce: rolls back `claimed`, emits `ClaimBounced`.
+
+#### `Extend`
+
+**Preconditions:**
+1. `sender() == creator`
+2. `now() < unlock_at`
+3. `new_unlock_at > unlock_at`
+4. `new_unlock_at <= now() + 10 years`
+
+**Effects:** `unlock_at = new_unlock_at`. Emits `Extended`.
+
+#### `ResetPendingClaim`
+
+**Preconditions:**
+1. `sender() == beneficiary`
+2. `pending_claim == true`
+3. `now() >= pending_since + 6 hours`
+
+**Effects:** clears `pending_*`. **Does NOT roll back `claimed`** (see L1). Emits `PendingClaimReset`.
+
+#### `bounced<JettonTransfer>`
+
+**Preconditions:** `sender() == jetton_wallet`
+
+**Effects:** if `pending_claim && query_id == pending_query_id` → `claimed -= last_claim`, clears `pending_*`, emits `ClaimBounced`. Otherwise emits `StaleBounceIgnored`.
+
+#### `receive()` — plain TON top-ups accepted.
+
+### Getters
+
+| Getter | Returns |
+|--------|---------|
+| `lockId()` | `lock_id` |
+| `factory()` | `factory` |
+| `jettonMaster()` | `jetton_master` |
+| `jettonWallet()` | `jetton_wallet` |
+| `beneficiary()` | `beneficiary` |
+| `creator()` | `creator` |
+| `totalAmount()` | `total_amount` |
+| `claimedAmount()` | `claimed` |
+| `available()` | `total_amount - claimed` |
+| `availableClaimable()` | 0 if not funded / still locked / pending, else `available` |
+| `unlockAt()` | `unlock_at` |
+| `createdAt()` | `created_at` |
+| `isPending()` | `pending_claim` |
+| `pendingSince()` | `pending_since` |
+| `pendingQueryId()` | `pending_query_id` |
+| `lastClaimAmount()` | `last_claim` |
+| `isFunded()` | `funded` |
+
+---
+
+## 4. Message types
+
+### TEP-74
+
+| Opcode | Message | Direction |
+|--------|---------|-----------|
+| `0x0f8a7ea5` | `JettonTransfer` | Outgoing |
+| `0x7362d09c` | `JettonNotification` | Incoming |
+
+### Platform control
+
+| Opcode | Message | Sender |
+|--------|---------|--------|
+| `0x21` | `SetJettonWallet` | treasury → factory |
+| `0x20` | `WithdrawFees` | treasury → factory |
+| `0x22` | `WithdrawTonFees` | treasury → factory |
+| `0x10` | `Claim` | beneficiary → wallet |
+| `0x11` | `Extend` | creator → wallet |
+| `0x12` | `ResetPendingClaim` | beneficiary → wallet |
+| `0x1` | `CreateLock` (forward payload) | user → factory (via jetton transfer) |
+
+---
+
+## 5. Events
+
+### Factory (range `0x100`–`0x11F`)
+
+| Opcode | Event |
+|--------|-------|
+| `0x100` | `LockCreated` |
+| `0x104` | `WithdrawBounced` |
+| `0x106` | `TonFeeCollected` |
+| `0x107` | `FeesWithdrawn` |
+| `0x108` | `OverpayRefunded` |
+| `0x109` | `JettonWalletSet` |
+| `0x110` | `TonFeesWithdrawn` |
+| `0x111` | `LockCreationFailed` |
+| `0x112` | `CreateBounced` |
+
+### Wallet (range `0x124`–`0x12F`)
+
+| Opcode | Event |
+|--------|-------|
+| `0x124` | `Claimed` |
+| `0x125` | `Extended` |
+| `0x126` | `ClaimBounced` |
+| `0x127` | `PendingClaimReset` |
+| `0x128` | `StaleBounceIgnored` |
+| `0x129` | `LockFunded` |
+| `0x12A` | `UnexpectedDeposit` |
+
+**Note:** ranges are disjoint so indexers can route events by opcode.
+
+---
+
+## 6. Constants
+
+### Factory
+
+| Name | Value | Purpose |
+|------|-------|---------|
+| `PLATFORM_FEE_TON` | 1 TON | Per-lock platform fee |
+| `GAS_BUFFER_TON` | 0.25 TON | Minimum gas buffer |
+| `DEPLOY_GAS` | 0.15 TON | Sent with child deploy |
+| `TRANSFER_GAS` | 0.15 TON | Sent with jetton transfer |
+| `REFUND_GAS` | 0.08 TON | Sent with refunds |
+| `MAX_LOCK_DURATION` | 315360000 (10y) | Max unlock horizon |
+| `CREATE_LOCK_OP` | `0x1` | Payload opcode |
+
+### Wallet
+
+| Name | Value | Purpose |
+|------|-------|---------|
+| `MAX_EXTEND_HORIZON` | 315360000 (10y) | Max extend horizon |
+| `CLAIM_GAS` | 0.07 TON | Gas for claim transfer |
+| `PENDING_TIMEOUT` | 21600 (6h) | Reset pending after this |
+
+---
+
+## 7. Invariants
+
+### Factory (F1–F9)
+
+1. `next_id` strictly increases, never reused.
+2. `own_wallets[m]` set ⇔ master `m` is whitelisted.
+3. `wallet_to_master[w] = m` ⇔ `own_wallets[m] = w` (bijection).
+4. `fees[m]` = sum of 0.5% cuts − withdrawals.
+5. `pending_withdraw[qid]` and `pending_jetton[qid]` set/cleared together.
+6. `used_qids` monotonic: once true, never false.
+7. `pending_create[qid]` set at create, cleared on success or bounce.
+8. `create_jetton[qid]` tracks master for refund on create bounce.
+9. `ton_fees >= 0` at all times.
+
+### Wallet (I1–I9)
+
+1. `0 <= claimed <= total_amount`.
+2. `available >= 0`.
+3. At most one claim in-flight.
+4. `jetton_wallet` set at deploy time by factory.
+5. Only beneficiary can claim / reset pending.
+6. Creator can only extend forward, while still locked.
+7. Bounce restores accounting only on `query_id` match.
+8. `total_amount` immutable.
+9. Claim requires `funded == true`.
+
+---
+
+## 8. Known limitations
+
+**Wallet:**
+- **L1:** `ResetPendingClaim` does not roll back `claimed` (stuck-but-safe trade-off).
+- **L2:** Non-factory jetton deposits accepted but ignored (`UnexpectedDeposit`).
+- **L3:** No top-ups extend `total_amount`.
+
+**Factory:**
+- **L1:** Lost fee-withdrawal bounce leaves `pending_withdraw[qid]` set forever (no funds lost).
+- **L2:** Overpay refund goes to `msg.sender` (original owner).
+- **L3:** Create-transfer bounce leaves an empty deployed `LockupWallet`; frontends filter by `LockCreationFailed`.
+
+---
+
+## 9. Trust model
+
+| Party | Trusted for |
+|-------|-------------|
+| Treasury | Whitelisting masters, fee withdrawal |
+| Factory | Deploy, one-time deposit, overpay refund |
+| Creator | Extend only (forward, while locked) |
+| Beneficiary | Claim after unlock, reset stuck pending |
+
+**Treasury compromise:** DoS on new locks. **No theft** of locked jettons.
+
+---
+
+## 10. Sequence diagrams
+
+### Create lock
+
+```
+User          JettonWallet         Factory          LockupWallet
+ │                 │                  │                  │
+ │── JettonTransfer ─▶                │                  │
+ │                 │── JettonNotify ─▶│                  │
+ │                 │                  │ verify whitelist │
+ │                 │                  │ charge 1 TON     │
+ │                 │                  │ refund overpay   │
+ │                 │                  │── deploy ───────▶│
+ │                 │                  │── JettonTransfer ─▶ (child wallet)
+ │                 │                  │ emit LockCreated │
 ```
 
-The factory detects the flag and unwraps:
+### Claim
 
-```tact
-let sc: Slice = msg.forward_payload;
-if (sc.loadBit()) {
-    sc = sc.loadRef().beginParse();
-}
+```
+Beneficiary      LockupWallet        JettonWallet
+ │                   │                    │
+ │── Claim ─────────▶│                    │
+ │                   │ verify sender,     │
+ │                   │ funded, unlock_at, │
+ │                   │ not pending        │
+ │                   │── JettonTransfer ─▶│
+ │                   │                    │ (success: done)
+ │                   │◀── bounce ─────────│ (failure: rollback claimed)
 ```
 
-This encoding is tested by the sandbox suite and is the **mandatory format** for all frontend integrations.
+---
 
-## 3. Messages (Tact)
-
-### LockupFactory
-
-**`CreateLock`** (from user, embedded as forward payload):
-```tact
-message(0x1) CreateLock {
-  query_id: Int as uint64;
-  jetton_master: Address;
-  beneficiary: Address;
-  creator: Address;
-  unlock_at: Int as uint64;
-}
-```
-
-**`JettonNotification`** (TEP-74 standard, from user's jetton wallet):
-```tact
-message(0x7362d09c) JettonNotification {
-  query_id: Int as uint64;
-  amount: Int as coins;
-  sender: Address;
-  forward_payload: Slice as remaining;  // carries wrapped CreateLock (see 2.5)
-}
-```
-
-**`DeployLock`** (internal, factory -> new wallet):
-```tact
-message(0x2) DeployLock {
-  jetton_master: Address;
-  beneficiary: Address;
-  total_amount: Int as coins;
-  unlock_at: Int as uint64;
-  creator: Address;
-}
-```
-
-### LockupWallet
-
-**`Claim`** (from beneficiary):
-```tact
-message(0x10) Claim {
-  query_id: Int as uint64;
-}
-```
-
-**`Extend`** (from creator, can only PUSH the date forward):
-```tact
-message(0x11) Extend {
-  new_unlock_at: Int as uint64;
-}
-```
-
-**`ReceiveJetton`** (internal, TEP-74 standard):
-```tact
-message(0x178d4519) ReceiveJetton {
-  query_id: Int as uint64;
-  amount: Int as coins;
-  sender: Address;
-  forward_payload: Cell;
-}
-```
-
-## 4. Lock Creation Flow
-
-1. User picks jetton, amount, unlock date, beneficiary in the mini app
-2. Frontend builds a `CreateLock` payload, wraps it in a **TEP-74 compliant forward cell** (`storeBit(1)` + `storeRef(CreateLockCell)`) and sends a jetton transfer from the user's jetton wallet with `forward_payload = wrapped`
-3. User's jetton wallet transfers jettons to the factory's jetton wallet with the forward payload
-4. Factory's jetton wallet receives jettons and emits `JettonNotification` to the factory
-5. Factory parses the payload, validates params, takes the fee (0.5%), deploys a new `LockupWallet` and forwards the remaining jettons to it
-6. LockupWallet initializes with the params and emits `LockCreated(lock_id, creator, beneficiary, amount, unlock_at)`
-7. Indexer catches the event, writes to DB, frontend shows the new lock
-
-## 5. Claim Flow
-
-1. After `unlock_at` the beneficiary taps Claim in the mini app
-2. Frontend sends `Claim` to the LockupWallet
-3. Wallet validates:
-   - `now >= unlock_at` (otherwise reject)
-   - sender == `beneficiary` (otherwise reject)
-   - `total_amount - claimed > 0`
-4. Wallet sends a jetton transfer to the beneficiary
-5. Wallet updates `claimed = total_amount`
-6. Emits `Claimed(lock_id, amount, beneficiary)`
-
-## 6. Extend Flow
-
-1. Creator taps Extend and picks a new date later than the current one
-2. Wallet validates:
-   - sender == `creator`
-   - `new_unlock_at > unlock_at` (forward only)
-   - `new_unlock_at <= now + 10 years` (sanity check)
-3. Wallet updates `unlock_at = new_unlock_at`
-4. Emits `Extended(lock_id, old_unlock_at, new_unlock_at)`
-
-## 7. Platform Fee
-
-- **0.5% of total_amount** in jettons, taken at creation
-- Fees accumulate in the factory per jetton master and are withdrawn by the treasury via `WithdrawFees` (multisig treasury in v2)
-- Locks with zero or negative post-fee amount are rejected
-- Supply-based caps are enforced off-chain by the indexer catalog policy (v1)
-
-## 8. Edge Cases & Protections
-
-| Case | Handling |
-|---|---|
-| Claim before unlock_at | Rejected, jettons stay locked |
-| Claim by non-beneficiary | Rejected |
-| Extend by non-creator | Rejected |
-| Extend into the past | Rejected |
-| Repeat claim | Ok while claimed < total, rejected after |
-| Non-TEP-74 jetton | Factory cannot parse payload, rejected |
-| Amount too small | Rejected at factory |
-| LockupWallet gas runs low | 0.1 TON reserve attached at deploy |
-
-## 9. Events for the Indexer
-
-All events emitted via `emit`:
-- `LockCreated(lock_id: Int, creator: Address, beneficiary: Address, jetton: Address, amount: Int, unlock_at: Int)`
-- `Claimed(lock_id: Int, amount: Int, beneficiary: Address)`
-- `Extended(lock_id: Int, old_unlock_at: Int, new_unlock_at: Int)`
-
-## 10. Security
-
-- Contracts are non-custodial: nobody holds keys
-- v1 has no upgradability — code is fixed, audit reads it once
-- Treasury wallet is a separate multisig (2-of-3 minimum)
-- Rate limit on lock creation per address (anti-spam for the factory)
-- Jetton master whitelist at launch (no junk jettons in the catalog)
-
-## 11. Out of Scope (v2)
-
-- Linear vesting with cliff
-- Multiple beneficiaries with shares
-- Revocable grants (for investors)
-- LP token locks
-- Staking of locked jettons (yield on top of lock)
-- Fiat on-ramp for fee payment
-
-## 12. Required Test Cases
-
-1. Create lock with valid params -> jettons land in the wallet
-2. Claim before unlock_at -> rejected
-3. Claim at unlock_at -> jettons arrive to beneficiary
-4. Claim by non-beneficiary -> rejected
-5. Extend forward by creator -> ok
-6. Extend into the past -> rejected
-7. Extend by non-creator -> rejected
-8. Fee of 0.5% arrives to treasury
-9. Repeat partial claim
-10. Attack: create lock with a malformed jetton master
-
-### 13. Testnet deployment (v1)
-
-- Factory address (testnet): `kQAhTRlJwkdR2vYdXz-RowoEGum_ITUZZFj6gdKdSggfjnNh`
-- Treasury: deployer wallet (testnet), multisig in v2
-- Deployer derivation: BIP39 12-word mnemonic + SLIP-0010 ed25519, path m/44'/607'/0', wallet v5r1, networkGlobalId -3
-- Secrets: TESTNET_MNEMONIC, TONCENTER_API_KEY (testnet-only, rotate before any mainnet use)
+**End of specification.**
