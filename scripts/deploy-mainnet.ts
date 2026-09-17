@@ -2,28 +2,34 @@
 import * as ton from '@ton/ton';
 import { mnemonicToPrivateKey } from '@ton/crypto';
 import { Address, beginCell, toNano } from '@ton/core';
+import { getHttpEndpoint } from '@orbs-network/ton-access';
 import { LockupFactory } from '../build/LockupFactory_LockupFactory';
 
 const TREASURY = 'EQAODQiP22xLiu_ZGxCfaY6o358FX4-G9bE8D_DTKVzjWwEl';
 const COGNIQ_MASTER = 'EQDOjRZ5rbSnBBvhsv4g0JNN67p89617_2pNc_AO1dTEkaNg';
 
-// Try multiple endpoints. First that responds wins.
-const ENDPOINTS = [
-    'https://mainnet-v4.tonhubapi.com',
-    'https://toncenter.com/api/v2/jsonRPC',
-];
-
 async function pickClient(apiKey?: string): Promise<ton.TonClient> {
-    for (const url of ENDPOINTS) {
-        try {
-            const c = new ton.TonClient({ endpoint: url, apiKey });
-            // cheap probe
-            await c.getMasterchainInfo();
-            console.log('RPC OK:', url);
-            return c;
-        } catch (e) {
-            console.log('RPC FAIL:', url, (e as Error).message);
-        }
+    // 1) Orbs TON Access — works from GitHub Actions, no Cloudflare
+    try {
+        const endpoint = await getHttpEndpoint({ network: 'mainnet' });
+        const c = new ton.TonClient({ endpoint });
+        await c.getMasterchainInfo();
+        console.log('RPC OK (Orbs):', endpoint);
+        return c;
+    } catch (e) {
+        console.log('Orbs FAIL:', (e as Error).message);
+    }
+    // 2) Fallback: Toncenter with key
+    try {
+        const c = new ton.TonClient({
+            endpoint: 'https://toncenter.com/api/v2/jsonRPC',
+            apiKey,
+        });
+        await c.getMasterchainInfo();
+        console.log('RPC OK (Toncenter+key)');
+        return c;
+    } catch (e) {
+        console.log('Toncenter FAIL:', (e as Error).message);
     }
     throw new Error('All endpoints failed');
 }
@@ -67,8 +73,9 @@ async function main() {
         console.log('Sent. Waiting 30s...');
         await new Promise((r) => setTimeout(r, 30000));
         const after = await client.getContractState(factory.address);
+        console.log('After deploy state:', after.state);
         if (after.state !== 'active') {
-            console.log('⚠️ Not active yet. Check explorer in a minute.');
+            console.log('⚠️ Not active yet. Check explorer.');
         } else {
             console.log('FACTORY DEPLOYED ✅');
         }
