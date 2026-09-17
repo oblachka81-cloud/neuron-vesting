@@ -14,6 +14,15 @@ const api = require('./api');
 const auth = require('./auth');
 
 const server = http.createServer(async (req, res) => {
+  // CORS: allow the Pages showcase to call our API
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204);
+    res.end();
+    return;
+  }
   if (req.url === '/health') {
     const stats = await db.getStats();
     const whitelist = await db.listWhitelist();
