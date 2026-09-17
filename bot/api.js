@@ -49,10 +49,18 @@ async function getJettonIcon(master) {
   let uri = m[0];
   if (uri.startsWith('ipfs://')) uri = 'https://ipfs.io/ipfs/' + uri.slice(7);
   const mres = await fetch(uri);
-  const mj = await mres.json();
-  let image = mj.image || mj.image_url || null;
+  const ctype = (mres.headers.get('content-type') || '').toLowerCase();
+  const text = await mres.text();
+  let image = null;
+  try {
+    const mj = JSON.parse(text);
+    image = mj.image || mj.image_url || null;
+  } catch {
+    if (ctype.startsWith('image/') || /\.(png|jpe?g|gif|webp|svg)$/i.test(uri)) image = uri;
+    else throw new Error('metadata URI is neither JSON nor image (' + ctype + ')');
+  }
   if (image && image.startsWith('ipfs://')) image = 'https://ipfs.io/ipfs/' + image.slice(7);
-  if (image) iconCache.set(master, { t: Date.now(), image });  // cache ONLY successes
+  if (image) iconCache.set(master, { t: Date.now(), image });
   return image;
 }
 
