@@ -129,8 +129,8 @@ contract LockupFactory {
         if (amt != null && jmA != null) {
             let cur: Int? = self.fees.get(jmA!!);
             self.fees.set(jmA!!, (cur != null ? cur!! : 0) + amt!!);
-            self.pending_amt.delete(msg.query_id);
-            self.pending_jm.delete(msg.query_id);
+            self.pending_amt.set(msg.query_id, null);
+            self.pending_jm.set(msg.query_id, null);
             emit(WithdrawBounced{ query_id: msg.query_id, amount: amt!! }.toCell());
         }
     }
