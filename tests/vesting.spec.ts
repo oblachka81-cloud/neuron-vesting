@@ -283,4 +283,17 @@ describe('NEURON Vesting — full suite (v2.1)', () => {
             from: attacker.address, to: factory.address, success: false,
         });
     });
+    it('17. withdraw bounce restores fee balance', async () => {
+        const unlockAt = BigInt(Math.floor(Date.now() / 1000) + 3600);
+        const wallet = await createLock(unlockAt);
+        await factory.send(treasury.getSender(), { value: toNano('0.5') },
+            { $$type: 'SetJettonWallet', query_id: 0n,
+              jetton_master: jettonMaster.address, jetton_wallet: wallet.address });
+        const before = await factory.getFeeOf(jettonMaster.address);
+        await factory.send(treasury.getSender(), { value: toNano('0.5') },
+            { $$type: 'WithdrawFees', query_id: 77n,
+              jetton_master: jettonMaster.address,
+              destination_wallet: treasury.address, amount: 5_000_000n });
+        expect(await factory.getFeeOf(jettonMaster.address)).toEqual(before);
+    });
 });
