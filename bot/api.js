@@ -43,7 +43,10 @@ async function getJettonIcon(master) {
   const cs = contentCell.beginParse();
   const prefix = cs.loadUint(8);
   if (prefix !== 0) throw new Error('on-chain metadata (prefix ' + prefix + ') not supported yet');
-  let uri = readSnake(cs).trim();
+  const raw = readSnake(cs);
+  const m = raw.match(/(https?:\/\/|ipfs:\/\/)[^\s\u0000-\u001F"'<>]+/);
+  if (!m) throw new Error('no URI in jetton content');
+  let uri = m[0];
   if (uri.startsWith('ipfs://')) uri = 'https://ipfs.io/ipfs/' + uri.slice(7);
   const mres = await fetch(uri);
   const mj = await mres.json();
