@@ -42,14 +42,14 @@ async function getJettonIcon(master) {
   const contentCell = Cell.fromBoc(Buffer.from(j.result.stack[3][1].bytes, 'base64'))[0];
   const cs = contentCell.beginParse();
   const prefix = cs.loadUint(8);
-  let image = null;
-  if (prefix === 0) {
-    const uri = readSnake(cs);
-    const mres = await fetch(uri);
-    const mj = await mres.json();
-    image = mj.image || null;
-  }
-  iconCache.set(master, { t: Date.now(), image });
+  if (prefix !== 0) throw new Error('on-chain metadata (prefix ' + prefix + ') not supported yet');
+  let uri = readSnake(cs).trim();
+  if (uri.startsWith('ipfs://')) uri = 'https://ipfs.io/ipfs/' + uri.slice(7);
+  const mres = await fetch(uri);
+  const mj = await mres.json();
+  let image = mj.image || mj.image_url || null;
+  if (image && image.startsWith('ipfs://')) image = 'https://ipfs.io/ipfs/' + image.slice(7);
+  if (image) iconCache.set(master, { t: Date.now(), image });  // cache ONLY successes
   return image;
 }
 
