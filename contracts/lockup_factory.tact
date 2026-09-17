@@ -100,15 +100,14 @@ contract LockupFactory {
         emit(TonFeeCollected{ lock_id: id, amount: ton("1") }.toCell());
     }
 
-    // Treasury withdraws accumulated jetton fees
     receive(msg: WithdrawFees) {
         require(sender() == self.treasury, "not treasury");
         let cur: Int? = self.fees.get(msg.jetton_master);
         require(cur != null, "no fees yet");
         require(cur!! >= msg.amount, "not enough fees");
         self.fees.set(msg.jetton_master, cur!! - msg.amount);
-        self.pending_withdraw = msg.amount;
-        self.pending_jetton = msg.jetton_master;
+        self.pending_amt.set(msg.query_id, msg.amount);
+        self.pending_jm.set(msg.query_id, msg.jetton_master);
         let jw: Address = self.own_wallets.get(msg.jetton_master)!!;
         send(SendParameters{
             to: jw,
@@ -118,7 +117,7 @@ contract LockupFactory {
                 query_id: msg.query_id,
                 amount: msg.amount,
                 destination: msg.destination_wallet,
-                response_destination: self.treasury,
+                response_destination: myAddress(),
                 custom_payload: null,
                 forward_ton_amount: 0,
                 forward_payload: emptySlice()
@@ -126,15 +125,15 @@ contract LockupFactory {
         });
     }
 
-    // Withdraw transfer bounced: restore fee balance from our own fields
     bounced(msg: bounced<JettonTransfer>) {
-        if (self.pending_jetton != null) {
-            let jm: Address = self.pending_jetton!!;
-            let cur: Int? = self.fees.get(jm);
-            self.fees.set(jm, (cur != null ? cur!! : 0) + self.pending_withdraw);
-            emit(WithdrawBounced{ query_id: 0, amount: self.pending_withdraw }.toCell());
-            self.pending_withdraw = 0;
-            self.pending_jetton = null;
+        let amt: Int? = self.pending_amt.get(msg.query_id);
+        let jmA: Address? = self.pending_jm.get(msg.query_id);
+        if (amt != null && jmA != null) {
+            let cur: Int? = self.fees.get(jmA!!);
+            self.fees.set(jmA!!, (cur != null ? cur!! : 0) + amt!!);
+            self.pending_amt.delete(msg.query_id);
+            self.pending_jm.delete(msg.query_id);
+            emit(WithdrawBounced{ query_id: msg.query_id, amount: amt!! }.toCell());
         }
     }
 
