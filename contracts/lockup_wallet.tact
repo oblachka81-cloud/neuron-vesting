@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════
-// NEURON Vesting — LockupWallet v2.6 (Final)
+// NEURON Vesting — LockupWallet v2.6.1 (Final)
 // ───────────────────────────────────────────────────────────────────────────
 // One instance per lock. Holds jettons, enforces unlock schedule, releases
 // to beneficiary. Non-custodial: neither creator nor factory can withdraw.
@@ -8,11 +8,12 @@
 //   I1. claimed ∈ [0, total_amount]
 //   I2. available = total_amount - claimed ≥ 0
 //   I3. at most one claim in-flight (pending_claim == true)
-//   I4. jetton_wallet = deterministic TEP-74 wallet of this contract
+//   I4. jetton_wallet is provided at deploy time by the factory
 //   I5. only beneficiary can claim / reset pending
 //   I6. creator can only push unlock_at forward, while still locked
 //   I7. bounce restores accounting ONLY if query_id matches in-flight claim
 //   I8. total_amount is immutable — no top-ups change it
+//   I9. claim requires funded == true
 //
 // Trust model:
 //   - beneficiary: can claim after unlock, can reset stuck pending.
@@ -23,17 +24,13 @@
 // Known limitations:
 //   L1. ResetPendingClaim does NOT roll back `claimed`. If a pending transfer
 //       failed silently (bounce lost) after reset, those jettons stay on the
-//       contract's jetton wallet, unaccounted and unrecoverable. Conservative
-//       choice: stuck-but-safe > recoverable-but-exploitable.
+//       contract's jetton wallet, unaccounted and unrecoverable.
 //   L2. Non-factory jetton deposits are accepted but ignored (emitted as
 //       UnexpectedDeposit). They stay on our jetton wallet, unaccounted.
-//       This avoids accidental burn if the sender's wallet uses bounce=false.
-//   L3. total_amount is fixed at deploy. No top-ups extend it. To add funds,
-//       create a new lock.
+//   L3. total_amount is fixed at deploy. No top-ups extend it.
 // ═══════════════════════════════════════════════════════════════════════════
 
 import "@stdlib/deploy";
-import "./jetton_wallet";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // TEP-74 messages
@@ -61,7 +58,7 @@ message(0x7362d09c) JettonNotification {
 // ═══════════════════════════════════════════════════════════════════════════
 
 message(0x10) Claim {
-    query_id: Int as uint64;   // must be > 0
+    query_id: Int as uint64;
     amount: Int as coins;      // 0 = claim all currently available
 }
 
@@ -138,6 +135,7 @@ contract LockupWallet {
     lock_id: Int as uint64;
     factory: Address;
     jetton_master: Address;
+    jetton_wallet: Address;      // I4: provided by factory at deploy
     beneficiary: Address;
     creator: Address;
 
@@ -147,22 +145,20 @@ contract LockupWallet {
     unlock_at: Int as uint64;
     created_at: Int as uint64;
 
-    // Derived
-    jetton_wallet: Address;
-
-    // In-flight claim tracking
+    // In-flight claim tracking (I3, I7)
     last_claim: Int as coins;
     pending_claim: Bool;
     pending_since: Int as uint64;
     pending_query_id: Int as uint64;
 
-    // Funding flag (I8)
+    // Funding flag (I9)
     funded: Bool;
 
     init(
         lock_id: Int,
         factory: Address,
         jetton_master: Address,
+        jetton_wallet: Address,
         beneficiary: Address,
         creator: Address,
         total_amount: Int,
@@ -171,17 +167,13 @@ contract LockupWallet {
         self.lock_id = lock_id;
         self.factory = factory;
         self.jetton_master = jetton_master;
+        self.jetton_wallet = jetton_wallet;
         self.beneficiary = beneficiary;
         self.creator = creator;
         self.total_amount = total_amount;
         self.claimed = 0;
         self.unlock_at = unlock_at;
         self.created_at = now();
-
-        // Deterministic TEP-74 jetton wallet of this contract.
-        // Order matters: init(owner, jetton_master).
-        self.jetton_wallet = contractAddress(initOf JettonWallet(myAddress(), jetton_master));
-
         self.last_claim = 0;
         self.pending_claim = false;
         self.pending_since = 0;
@@ -193,18 +185,13 @@ contract LockupWallet {
     // Deposits
     // ═══════════════════════════════════════════════════════════════════════
 
-    // Only accept notifications from our own deterministic jetton wallet.
-    // The first deposit from the factory marks the lock as funded.
-    // Any subsequent deposits (from factory or third parties) are accepted
-    // but ignored — see L2. We do NOT revert on unexpected deposits, to
-    // avoid accidental burn if the sender's jetton wallet uses bounce=false.
+    // Only accept notifications from our own jetton wallet.
+    // First notification matching total_amount marks the lock as funded.
+    // Others are accepted but ignored (L2).
     receive(msg: JettonNotification) {
         require(sender() == self.jetton_wallet, "not our jetton wallet");
 
-        if (!self.funded) {
-            // Initial funding. In standard TEP-74, `msg.sender` is the
-            // original owner (factory) who initiated the transfer.
-            // We accept the first notification unconditionally and mark funded.
+        if (!self.funded && msg.amount == self.total_amount) {
             self.funded = true;
             emit(LockFunded{
                 lock_id: self.lock_id,
@@ -214,8 +201,6 @@ contract LockupWallet {
             return;
         }
 
-        // Subsequent deposit: accept silently, emit for observability.
-        // Do not revert. See L2.
         emit(UnexpectedDeposit{
             lock_id: self.lock_id,
             sender: msg.sender,
@@ -229,6 +214,7 @@ contract LockupWallet {
 
     receive(msg: Claim) {
         require(sender() == self.beneficiary, "not beneficiary");
+        require(self.funded, "lock not funded");
         require(now() >= self.unlock_at, "still locked");
         require(!self.pending_claim, "claim in flight");
         require(msg.query_id > 0, "query_id must be > 0");
@@ -302,13 +288,9 @@ contract LockupWallet {
     // Rationale: we cannot distinguish on-chain whether the pending transfer
     // actually succeeded (no bounce) or was silently lost. Rolling back
     // `claimed` here would open a double-claim window if a delayed bounce
-    // arrives later for the reset query_id — the returned jettons would land
-    // on the contract while claimed was already lowered.
+    // arrives later for the reset query_id.
     //
-    // Conservative choice: keep `claimed` elevated. If the transfer actually
-    // succeeded, beneficiary got their jettons and accounting is correct.
-    // If it failed silently (bounce lost), those jettons stay on the contract
-    // — stuck, but not exploitable. See Known Limitation L1.
+    // Conservative choice: keep `claimed` elevated. See L1.
 
     receive(msg: ResetPendingClaim) {
         require(sender() == self.beneficiary, "not beneficiary");
@@ -328,14 +310,13 @@ contract LockupWallet {
     }
 
     // ═══════════════════════════════════════════════════════════════════════
-    // Bounce handler
+    // Bounce handler (I7)
     // ═══════════════════════════════════════════════════════════════════════
 
     bounced(msg: bounced<JettonTransfer>) {
         require(sender() == self.jetton_wallet, "not our wallet");
 
         if (!self.pending_claim) {
-            // No claim in-flight; nothing to reconcile.
             emit(StaleBounceIgnored{
                 lock_id: self.lock_id,
                 query_id: msg.query_id,
@@ -345,9 +326,6 @@ contract LockupWallet {
         }
 
         if (msg.query_id != self.pending_query_id) {
-            // Delayed bounce for an older, already-reset claim. Ignore to
-            // avoid corrupting current accounting. Jettons returned by this
-            // bounce stay unaccounted on the contract (see L1).
             emit(StaleBounceIgnored{
                 lock_id: self.lock_id,
                 query_id: msg.query_id,
@@ -356,7 +334,6 @@ contract LockupWallet {
             return;
         }
 
-        // Matching bounce: roll back the in-flight claim.
         self.claimed = self.claimed - self.last_claim;
 
         emit(ClaimBounced{
@@ -384,21 +361,20 @@ contract LockupWallet {
     get fun lockId(): Int { return self.lock_id; }
     get fun factory(): Address { return self.factory; }
     get fun jettonMaster(): Address { return self.jetton_master; }
+    get fun jettonWallet(): Address { return self.jetton_wallet; }
     get fun beneficiary(): Address { return self.beneficiary; }
     get fun creator(): Address { return self.creator; }
     get fun totalAmount(): Int { return self.total_amount; }
     get fun claimedAmount(): Int { return self.claimed; }
     get fun available(): Int { return self.total_amount - self.claimed; }
     get fun availableClaimable(): Int {
-        // Returns 0 while a claim is in-flight — frontends should use this
-        // for "Claim" button state.
+        if (!self.funded) { return 0; }
         if (self.pending_claim) { return 0; }
         if (now() < self.unlock_at) { return 0; }
         return self.total_amount - self.claimed;
     }
     get fun unlockAt(): Int { return self.unlock_at; }
     get fun createdAt(): Int { return self.created_at; }
-    get fun jettonWallet(): Address { return self.jetton_wallet; }
     get fun isPending(): Bool { return self.pending_claim; }
     get fun pendingSince(): Int { return self.pending_since; }
     get fun pendingQueryId(): Int { return self.pending_query_id; }
