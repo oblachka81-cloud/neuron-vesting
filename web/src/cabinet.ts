@@ -173,9 +173,9 @@ async function onAppSubmit(e: Event) {
 
 async function jettonIcon(master: string): Promise<string | null> {
   try {
-    const r = await fetch(`https://api.tonapi.io/v2/jettons/${master}`);
+    const r = await fetch(`${API_URL}/api/jetton/${encodeURIComponent(master)}/icon`);
     const j = await r.json();
-    return (j.metadata && j.metadata.image) || null;
+    return j.image || null;
   } catch { return null; }
 }
 async function refreshWhitelist() {
