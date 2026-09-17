@@ -15,12 +15,6 @@
 //   I8. total_amount is immutable — no top-ups change it
 //   I9. claim requires funded == true
 //
-// Trust model:
-//   - beneficiary: can claim after unlock, can reset stuck pending.
-//   - creator:     can extend unlock forward. CANNOT withdraw jettons.
-//   - factory:     can deposit jettons once. CANNOT withdraw them back.
-//   - anyone:      can send TON (gas) or jettons (ignored, see L2).
-//
 // Known limitations:
 //   L1. ResetPendingClaim does NOT roll back `claimed`. If a pending transfer
 //       failed silently (bounce lost) after reset, those jettons stay on the
@@ -31,27 +25,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 import "@stdlib/deploy";
-
-// ═══════════════════════════════════════════════════════════════════════════
-// TEP-74 messages
-// ═══════════════════════════════════════════════════════════════════════════
-
-message(0x0f8a7ea5) JettonTransfer {
-    query_id: Int as uint64;
-    amount: Int as coins;
-    destination: Address;
-    response_destination: Address;
-    custom_payload: Cell?;
-    forward_ton_amount: Int as coins;
-    forward_payload: Slice as remaining;
-}
-
-message(0x7362d09c) JettonNotification {
-    query_id: Int as uint64;
-    amount: Int as coins;
-    sender: Address;
-    forward_payload: Slice as remaining;
-}
+import "./messages";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Vesting messages
@@ -72,7 +46,7 @@ message(0x12) ResetPendingClaim {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Events
+// Events (wallet range 0x120-0x13F to avoid collision with factory)
 // ═══════════════════════════════════════════════════════════════════════════
 
 message(0x101) Claimed {
@@ -94,25 +68,25 @@ message(0x105) ClaimBounced {
     query_id: Int as uint64;
 }
 
-message(0x106) PendingClaimReset {
+message(0x120) PendingClaimReset {
     lock_id: Int as uint64;
     amount: Int as coins;
     query_id: Int as uint64;
 }
 
-message(0x107) StaleBounceIgnored {
+message(0x121) StaleBounceIgnored {
     lock_id: Int as uint64;
     query_id: Int as uint64;
     pending_query_id: Int as uint64;
 }
 
-message(0x108) LockFunded {
+message(0x122) LockFunded {
     lock_id: Int as uint64;
     amount: Int as coins;
     query_id: Int as uint64;
 }
 
-message(0x109) UnexpectedDeposit {
+message(0x123) UnexpectedDeposit {
     lock_id: Int as uint64;
     sender: Address;
     amount: Int as coins;
@@ -131,27 +105,23 @@ const PENDING_TIMEOUT: Int = 21600;          // 6 hours
 // ═══════════════════════════════════════════════════════════════════════════
 
 contract LockupWallet {
-    // Immutable identity
     lock_id: Int as uint64;
     factory: Address;
     jetton_master: Address;
-    jetton_wallet: Address;      // I4: provided by factory at deploy
+    jetton_wallet: Address;
     beneficiary: Address;
     creator: Address;
 
-    // Schedule & accounting
     total_amount: Int as coins;
     claimed: Int as coins;
     unlock_at: Int as uint64;
     created_at: Int as uint64;
 
-    // In-flight claim tracking (I3, I7)
     last_claim: Int as coins;
     pending_claim: Bool;
     pending_since: Int as uint64;
     pending_query_id: Int as uint64;
 
-    // Funding flag (I9)
     funded: Bool;
 
     init(
@@ -185,9 +155,6 @@ contract LockupWallet {
     // Deposits
     // ═══════════════════════════════════════════════════════════════════════
 
-    // Only accept notifications from our own jetton wallet.
-    // First notification matching total_amount marks the lock as funded.
-    // Others are accepted but ignored (L2).
     receive(msg: JettonNotification) {
         require(sender() == self.jetton_wallet, "not our jetton wallet");
 
@@ -229,7 +196,6 @@ contract LockupWallet {
         require(want > 0, "zero amount");
         require(want <= available, "exceeds available");
 
-        // Update accounting before send. Bounce handler will roll back if needed.
         self.last_claim = want;
         self.claimed = self.claimed + want;
         self.pending_claim = true;
@@ -280,17 +246,8 @@ contract LockupWallet {
     }
 
     // ═══════════════════════════════════════════════════════════════════════
-    // Reset stuck pending claim
+    // Reset stuck pending claim (does NOT roll back claimed — see L1)
     // ═══════════════════════════════════════════════════════════════════════
-    //
-    // CRITICAL: this does NOT roll back `claimed`.
-    //
-    // Rationale: we cannot distinguish on-chain whether the pending transfer
-    // actually succeeded (no bounce) or was silently lost. Rolling back
-    // `claimed` here would open a double-claim window if a delayed bounce
-    // arrives later for the reset query_id.
-    //
-    // Conservative choice: keep `claimed` elevated. See L1.
 
     receive(msg: ResetPendingClaim) {
         require(sender() == self.beneficiary, "not beneficiary");
@@ -347,10 +304,6 @@ contract LockupWallet {
         self.pending_since = 0;
         self.pending_query_id = 0;
     }
-
-    // ═══════════════════════════════════════════════════════════════════════
-    // Plain TON top-ups (gas)
-    // ═══════════════════════════════════════════════════════════════════════
 
     receive() { }
 
