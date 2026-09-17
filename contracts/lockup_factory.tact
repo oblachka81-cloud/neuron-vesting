@@ -8,8 +8,8 @@ contract LockupFactory {
     treasury: Address;
     fees: map<Address, Int>;
     own_wallets: map<Address, Address>;
-    pending_withdraw: Int as coins;
-    pending_jetton: Address?;
+    pending_amt: map<Int, Int as coins>;
+    pending_jm: map<Int, Address>;
     ton_fees: Int as coins;
 
     init(treasury: Address) {
