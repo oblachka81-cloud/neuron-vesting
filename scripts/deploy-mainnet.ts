@@ -1,4 +1,4 @@
-// Deploy LockupFactory v2 to MAINNET (with fallback RPC)
+// Deploy LockupFactory v2 to MAINNET
 import * as ton from '@ton/ton';
 import { mnemonicToPrivateKey } from '@ton/crypto';
 import { Address, beginCell, toNano } from '@ton/core';
@@ -7,34 +7,32 @@ import { LockupFactory } from '../build/LockupFactory_LockupFactory';
 const TREASURY = 'EQAODQiP22xLiu_ZGxCfaY6o358FX4-G9bE8D_DTKVzjWwEl';
 const COGNIQ_MASTER = 'EQDOjRZ5rbSnBBvhsv4g0JNN67p89617_2pNc_AO1dTEkaNg';
 
-// Two endpoints — try Toncenter first, fall back to Orbs
+// Try multiple endpoints. First that responds wins.
 const ENDPOINTS = [
-    { url: 'https://toncenter.com/api/v2/jsonRPC', key: process.env.TONCENTER_API_KEY },
-    { url: 'https://ton.access.orbs.network/1/rpc', key: undefined },
-    { url: 'https://toncenter.com/api/v2/jsonRPC', key: undefined },
+    'https://mainnet-v4.tonhubapi.com',
+    'https://toncenter.com/api/v2/jsonRPC',
 ];
+
+async function pickClient(apiKey?: string): Promise<ton.TonClient> {
+    for (const url of ENDPOINTS) {
+        try {
+            const c = new ton.TonClient({ endpoint: url, apiKey });
+            // cheap probe
+            await c.getMasterchainInfo();
+            console.log('RPC OK:', url);
+            return c;
+        } catch (e) {
+            console.log('RPC FAIL:', url, (e as Error).message);
+        }
+    }
+    throw new Error('All endpoints failed');
+}
 
 async function main() {
     const mnemonic = (process.env.MAINNET_MNEMONIC || '').trim();
     if (!mnemonic) throw new Error('MAINNET_MNEMONIC is not set');
 
-    // Pick working endpoint
-    let client: ton.TonClient | null = null;
-    for (const ep of ENDPOINTS) {
-        try {
-            const c = new ton.TonClient({
-                endpoint: ep.url,
-                apiKey: ep.key || undefined,
-            });
-            await c.getBalance(Address.parse(TREASURY));
-            client = c;
-            console.log('RPC OK:', ep.url, ep.key ? '(with key)' : '(no key)');
-            break;
-        } catch (e) {
-            console.log('RPC FAIL:', ep.url, (e as Error).message);
-        }
-    }
-    if (!client) throw new Error('All RPC endpoints failed');
+    const client = await pickClient(process.env.TONCENTER_API_KEY);
 
     const pk = await mnemonicToPrivateKey(mnemonic.split(/\s+/));
     const wallet = ton.WalletContractV5R1.create({ workchain: 0, publicKey: pk.publicKey });
@@ -52,7 +50,8 @@ async function main() {
     console.log('FACTORY :', factory.address.toString());
     console.log('Explorer: https://tonviewer.com/' + factory.address.toString());
 
-    if (!(await client.isContractDeployed(factory.address))) {
+    const initial = await client.getContractState(factory.address);
+    if (initial.state !== 'active') {
         console.log('Deploying...');
         const seqno = await walletContract.getSeqno();
         await walletContract.sendTransfer({
@@ -65,16 +64,14 @@ async function main() {
                 body: beginCell().endCell(),
             })],
         });
-        for (let i = 0; i < 30; i++) {
-    await new Promise((r) => setTimeout(r, 5000));  // 5 сек вместо 3
-    try {
-        if (await client.isContractDeployed(factory.address)) break;
-    } catch (e) {
-        console.log('Polling retry...', (e as Error).message);
-    }
-}
-        if (!(await client.isContractDeployed(factory.address))) throw new Error('Not active after 90s');
-        console.log('FACTORY DEPLOYED ✅');
+        console.log('Sent. Waiting 30s...');
+        await new Promise((r) => setTimeout(r, 30000));
+        const after = await client.getContractState(factory.address);
+        if (after.state !== 'active') {
+            console.log('⚠️ Not active yet. Check explorer in a minute.');
+        } else {
+            console.log('FACTORY DEPLOYED ✅');
+        }
     } else {
         console.log('Already deployed');
     }
