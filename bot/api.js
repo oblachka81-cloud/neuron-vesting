@@ -96,7 +96,7 @@ async function addRoutes(req, res) {
     try {
       const image = await getJettonIcon(decodeURIComponent(iconMatch[1]));
       return json(res, 200, { image });
-    } catch (e) { return json(res, 200, { image: null }); }
+    } catch (e) { return json(res, 200, { image: null, error: e.message }); }
   }
 
   // ---- applicant ----
