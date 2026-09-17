@@ -171,6 +171,13 @@ async function onAppSubmit(e: Event) {
   }
 }
 
+async function jettonIcon(master: string): Promise<string | null> {
+  try {
+    const r = await fetch(`https://api.tonapi.io/v2/jettons/${master}`);
+    const j = await r.json();
+    return (j.metadata && j.metadata.image) || null;
+  } catch { return null; }
+}
 async function refreshWhitelist() {
   const list = document.getElementById('whitelist-list')!;
   list.innerHTML = '<p class="hint">Loading...</p>';
@@ -180,10 +187,21 @@ async function refreshWhitelist() {
     const wl = j.whitelist || [];
     if (wl.length === 0) { list.innerHTML = '<p class="hint">No approved jettons yet</p>'; return; }
     list.innerHTML = wl.map((x: any) => `<div class="lock-card">
-      <div class="lock-head"><b>${x.symbol || '?'}</b> · ${x.name || '—'}</div>
+      <div class="lock-head">
+        <img data-icon="${x.jetton_master}" width="26" height="26" alt=""
+             style="border-radius:50%;vertical-align:middle;background:#222;margin-right:6px" />
+        <b>${x.symbol || '?'}</b> · ${x.name || '—'}
+      </div>
       <div class="lock-foot"><code>${x.jetton_master}</code> ·
         <a href="${EXPLORER(x.jetton_master)}" target="_blank">explorer ↗</a></div>
     </div>`).join('');
+    // pull icons sequentially (tonapi free tier = 1 req/s)
+    const imgs = Array.from(list.querySelectorAll('img[data-icon]')) as HTMLImageElement[];
+    for (const img of imgs) {
+      const src = await jettonIcon(img.dataset.icon!);
+      if (src) img.src = src; else img.style.display = 'none';
+      await new Promise((r2) => setTimeout(r2, 300));
+    }
   } catch (e: any) {
     list.innerHTML = `<p class="hint" style="color:#ff6b6b">Error: ${e.message}</p>`;
   }
