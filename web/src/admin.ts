@@ -140,16 +140,21 @@ admin: ${d.revoked ? '✅ zero (revoked)' : '⚠️ ' + d.admin.toString()}</pre
       const apps = (await api('/api/admin/applications')).applications;
       const a = apps.find((x: any) => x.id === id);
       const master = Address.parse(a.jetton_master);
-      const jw = await factoryJettonWallet(master);
-      const link = deepLink(setJettonWalletBody(master, jw));
       await api('/api/admin/applications/approve', {
-        method: 'POST', body: JSON.stringify({ id, name: a.applicant_name, symbol: (a.applicant_name || '').split(' ')[0] }),
+        method: 'POST',
+        body: JSON.stringify({ id, name: a.applicant_name, symbol: (a.applicant_name || '').split(' ')[0] }),
       });
-      box.innerHTML = `<p class="ok">✅ DB approved + whitelist updated.</p>
-        <p class="hint">On-chain step: sign SetJettonWallet with TREASURY wallet (factory jetton wallet: ${jw.toString()}).
-        ${IS_TEST ? ' Сейчас testnet — подпись понадобится после перехода на mainnet.' : ''}</p>
-        <pre>${link}</pre>
-        <button class="gray" onclick="navigator.clipboard.writeText('${link}')">Copy link</button>`;
+      let linkBlock = '<p class="hint">On-chain deep-link появится после переключения на mainnet (сейчас testnet). Одобрение в БД выполнено.</p>';
+      try {
+        const jw = await factoryJettonWallet(master);
+        const link = deepLink(setJettonWalletBody(master, jw));
+        linkBlock = `<p class="hint">On-chain шаг: подпиши SetJettonWallet кошельком TREASURY (factory jetton wallet: ${jw.toString()}).</p>
+          <pre>${link}</pre>
+          <button class="gray" onclick="navigator.clipboard.writeText('${link}')">Copy link</button>`;
+      } catch (e: any) {
+        linkBlock = `<p class="hint">On-chain ссылка не собрана (${e.message}) — появится после mainnet-переключения; БД-одобрение готово.</p>`;
+      }
+      box.innerHTML = `<p class="ok">✅ DB approved + whitelist updated.</p>${linkBlock}`;
       loadQueue();
     } catch (e: any) { box.innerHTML = `<p class="hint err">Approve failed: ${e.message}</p>`; }
   },
