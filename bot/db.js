@@ -237,6 +237,9 @@ async function deleteSession(token) {
 async function purgeExpiredSessions() {
   await sql`DELETE FROM admin_sessions WHERE expires_at <= NOW()`;
 }
+async function listEvents(limit) {
+  return await sql`SELECT * FROM lock_events ORDER BY id DESC LIMIT ${limit}`;
+}
 
 async function close() { await sql.end(); }
 
@@ -245,5 +248,5 @@ module.exports = {
   getLocks, getOpenLocks, getStats, close,
   listWhitelist, upsertWhitelist, removeWhitelist,
   listApplications, getApplication, getApplicationByMaster, insertApplication, decideApplication,
-  createSession, getSession, deleteSession, purgeExpiredSessions,
+  createSession, getSession, deleteSession, purgeExpiredSessions, listEvents, 
 };
