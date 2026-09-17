@@ -21,6 +21,9 @@ async function migrate() {
       fee_jetton NUMERIC NOT NULL DEFAULT 0,
       created_at TIMESTAMPTZ DEFAULT NOW()
     )`;
+  
+  await sql`ALTER TABLE locks ADD COLUMN IF NOT EXISTS fee_jetton NUMERIC NOT NULL DEFAULT 0`;
+
   await sql`
     CREATE TABLE IF NOT EXISTS lock_events (
       id SERIAL PRIMARY KEY,
