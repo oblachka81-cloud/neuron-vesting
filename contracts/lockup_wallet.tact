@@ -46,47 +46,47 @@ message(0x12) ResetPendingClaim {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Events (wallet range 0x120-0x13F to avoid collision with factory)
+// Events (wallet range 0x124-0x12F to avoid collision with factory)
 // ═══════════════════════════════════════════════════════════════════════════
 
-message(0x101) Claimed {
+message(0x124) Claimed {
     lock_id: Int as uint64;
     amount: Int as coins;
     beneficiary: Address;
     query_id: Int as uint64;
 }
 
-message(0x102) Extended {
+message(0x125) Extended {
     lock_id: Int as uint64;
     old_unlock_at: Int as uint64;
     new_unlock_at: Int as uint64;
 }
 
-message(0x105) ClaimBounced {
+message(0x126) ClaimBounced {
     lock_id: Int as uint64;
     amount: Int as coins;
     query_id: Int as uint64;
 }
 
-message(0x120) PendingClaimReset {
+message(0x127) PendingClaimReset {
     lock_id: Int as uint64;
     amount: Int as coins;
     query_id: Int as uint64;
 }
 
-message(0x121) StaleBounceIgnored {
+message(0x128) StaleBounceIgnored {
     lock_id: Int as uint64;
     query_id: Int as uint64;
     pending_query_id: Int as uint64;
 }
 
-message(0x122) LockFunded {
+message(0x129) LockFunded {
     lock_id: Int as uint64;
     amount: Int as coins;
     query_id: Int as uint64;
 }
 
-message(0x123) UnexpectedDeposit {
+message(0x12A) UnexpectedDeposit {
     lock_id: Int as uint64;
     sender: Address;
     amount: Int as coins;
