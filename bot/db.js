@@ -1,4 +1,4 @@
-// bot/db.js — PostgreSQL wrapper + schema + queries (v3)
+// bot/db.js — PostgreSQL wrapper + schema + queries (v4: + applications, whitelist, sessions, ton_fees)
 const postgres = require('postgres');
 
 const DATABASE_URL = process.env.DATABASE_URL;
@@ -18,6 +18,7 @@ async function migrate() {
       unlock_at BIGINT NOT NULL,
       lockup_wallet TEXT NOT NULL,
       factory TEXT NOT NULL,
+      fee_jetton NUMERIC NOT NULL DEFAULT 0,
       created_at TIMESTAMPTZ DEFAULT NOW()
     )`;
   await sql`
@@ -38,7 +39,57 @@ async function migrate() {
     )`;
   await sql`INSERT INTO indexer_cursor (id, last_lt, last_hash) VALUES (1, 0, NULL) ON CONFLICT (id) DO NOTHING`;
   await sql`UPDATE indexer_cursor SET last_lt = 0, last_hash = NULL WHERE id = 1 AND (last_hash IS NULL OR LENGTH(last_hash) <> 64)`;
-  console.log('Database migrated');
+
+  // v4: whitelist — curated list of approved jettons with metadata
+  await sql`
+    CREATE TABLE IF NOT EXISTS whitelist (
+      jetton_master TEXT PRIMARY KEY,
+      name TEXT,
+      symbol TEXT,
+      description TEXT,
+      applicant TEXT,
+      approved_at TIMESTAMPTZ DEFAULT NOW(),
+      metadata JSONB DEFAULT '{}'::jsonb
+    )`;
+
+  // v4: applications — pending/rejected/decided whitelist requests
+  await sql`
+    CREATE TABLE IF NOT EXISTS applications (
+      id SERIAL PRIMARY KEY,
+      jetton_master TEXT NOT NULL UNIQUE,
+      applicant TEXT NOT NULL,
+      telegram_id BIGINT,
+      applicant_name TEXT,
+      project_url TEXT,
+      notes TEXT,
+      status TEXT NOT NULL DEFAULT 'pending',
+      decision_reason TEXT,
+      decided_by TEXT,
+      decided_at TIMESTAMPTZ,
+      due_diligence JSONB DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`;
+
+  // v4: admin sessions (in-memory is fine too, but DB keeps restart-proof)
+  await sql`
+    CREATE TABLE IF NOT EXISTS admin_sessions (
+      token TEXT PRIMARY KEY,
+      expires_at TIMESTAMPTZ NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`;
+
+  // v4: factory state — counters that mirror on-chain for dashboard
+  await sql`
+    CREATE TABLE IF NOT EXISTS factory_state (
+      id INT PRIMARY KEY DEFAULT 1,
+      ton_fees_accumulated NUMERIC NOT NULL DEFAULT 0,
+      ton_fees_withdrawn NUMERIC NOT NULL DEFAULT 0,
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )`;
+  await sql`INSERT INTO factory_state (id, ton_fees_accumulated, ton_fees_withdrawn)
+            VALUES (1, 0, 0) ON CONFLICT (id) DO NOTHING`;
+
+  console.log('Database migrated (v4)');
 }
 
 const big = (v) => BigInt(v ?? 0);
@@ -53,19 +104,18 @@ async function setCursor(lt, hash) {
 }
 
 async function insertLock(l) {
+  const amount = big(l.amount);
+  const fee = (amount * 50n) / 10000n;
   await sql`
-    INSERT INTO locks (lock_id, creator, beneficiary, jetton_master, amount, unlock_at, lockup_wallet, factory)
+    INSERT INTO locks (lock_id, creator, beneficiary, jetton_master, amount, unlock_at, lockup_wallet, factory, fee_jetton)
     VALUES (
-      ${String(l.lock_id)},
-      ${String(l.creator)},
-      ${String(l.beneficiary)},
-      ${String(l.jetton_master)},
-      ${String(l.amount)},
-      ${String(l.unlock_at)},
-      ${String(l.lockup_wallet)},
-      ${String(l.factory)}
-    )
-    ON CONFLICT (lock_id) DO NOTHING`;
+      ${String(l.lock_id)}, ${String(l.creator)}, ${String(l.beneficiary)},
+      ${String(l.jetton_master)}, ${String(l.amount)}, ${String(l.unlock_at)},
+      ${String(l.lockup_wallet)}, ${String(l.factory)}, ${fee.toString()}
+    ) ON CONFLICT (lock_id) DO NOTHING`;
+  await sql`UPDATE factory_state
+            SET ton_fees_accumulated = ton_fees_accumulated + 1000000000, updated_at = NOW()
+            WHERE id = 1`;
 }
 
 async function markClaimed(lockId, amount) {
@@ -105,9 +155,92 @@ async function getStats() {
   const a = await sql`SELECT COUNT(*)::int AS c FROM locks WHERE claimed_amount < amount AND unlock_at > ${now}`;
   const r = await sql`SELECT COUNT(*)::int AS c FROM locks WHERE claimed_amount < amount AND unlock_at <= ${now}`;
   const v = await sql`SELECT COALESCE(SUM(amount - claimed_amount), 0) AS s FROM locks WHERE claimed_amount < amount`;
-  return { total_locks: t[0].c, locked: a[0].c, ready_to_claim: r[0].c, tvl_nano: v[0].s.toString() };
+  const f = await sql`SELECT COALESCE(SUM(fee_jetton), 0) AS s FROM locks`;
+  const fs = await sql`SELECT ton_fees_accumulated, ton_fees_withdrawn FROM factory_state WHERE id = 1`;
+  return {
+    total_locks: t[0].c, locked: a[0].c, ready_to_claim: r[0].c,
+    tvl_nano: v[0].s.toString(),
+    jetton_fees_nano: f[0].s.toString(),
+    ton_fees_accumulated: (fs[0] && fs[0].ton_fees_accumulated).toString(),
+    ton_fees_withdrawn: (fs[0] && fs[0].ton_fees_withdrawn).toString(),
+  };
+}
+
+// ---- v4: whitelist ----
+async function listWhitelist() {
+  return await sql`SELECT * FROM whitelist ORDER BY approved_at DESC`;
+}
+async function upsertWhitelist(row) {
+  await sql`
+    INSERT INTO whitelist (jetton_master, name, symbol, description, applicant, metadata)
+    VALUES (${row.jetton_master}, ${row.name || null}, ${row.symbol || null},
+            ${row.description || null}, ${row.applicant || null}, ${sql.json(row.metadata || {})})
+    ON CONFLICT (jetton_master) DO UPDATE SET
+      name = EXCLUDED.name, symbol = EXCLUDED.symbol, description = EXCLUDED.description,
+      applicant = EXCLUDED.applicant, metadata = EXCLUDED.metadata, approved_at = NOW()`;
+}
+async function removeWhitelist(jettonMaster) {
+  await sql`DELETE FROM whitelist WHERE jetton_master = ${jettonMaster}`;
+}
+
+// ---- v4: applications ----
+async function listApplications(status) {
+  if (status) {
+    return await sql`SELECT * FROM applications WHERE status = ${status} ORDER BY created_at DESC`;
+  }
+  return await sql`SELECT * FROM applications ORDER BY CASE status
+      WHEN 'pending' THEN 0 WHEN 'approved' THEN 2 ELSE 1 END, created_at DESC`;
+}
+async function getApplication(id) {
+  const rows = await sql`SELECT * FROM applications WHERE id = ${id}`;
+  return rows[0] || null;
+}
+async function getApplicationByMaster(jettonMaster) {
+  const rows = await sql`SELECT * FROM applications WHERE jetton_master = ${jettonMaster}`;
+  return rows[0] || null;
+}
+async function insertApplication(a) {
+  const rows = await sql`
+    INSERT INTO applications (jetton_master, applicant, telegram_id, applicant_name, project_url, notes)
+    VALUES (${a.jetton_master}, ${a.applicant}, ${a.telegram_id || null},
+            ${a.applicant_name || null}, ${a.project_url || null}, ${a.notes || null})
+    ON CONFLICT (jetton_master) DO UPDATE SET
+      applicant = EXCLUDED.applicant, telegram_id = EXCLUDED.telegram_id,
+      applicant_name = EXCLUDED.applicant_name, project_url = EXCLUDED.project_url,
+      notes = EXCLUDED.notes, status = 'pending', decision_reason = NULL, decided_at = NULL
+    RETURNING *`;
+  return rows[0];
+}
+async function decideApplication(id, status, reason, decidedBy, dueDiligence) {
+  await sql`
+    UPDATE applications SET
+      status = ${status}, decision_reason = ${reason || null},
+      decided_by = ${decidedBy || null}, decided_at = NOW(),
+      due_diligence = ${sql.json(dueDiligence || {})}
+    WHERE id = ${id}`;
+}
+
+// ---- v4: admin sessions ----
+async function createSession(token, expiresAt) {
+  await sql`INSERT INTO admin_sessions (token, expires_at) VALUES (${token}, ${expiresAt})`;
+}
+async function getSession(token) {
+  const rows = await sql`SELECT * FROM admin_sessions WHERE token = ${token} AND expires_at > NOW()`;
+  return rows[0] || null;
+}
+async function deleteSession(token) {
+  await sql`DELETE FROM admin_sessions WHERE token = ${token}`;
+}
+async function purgeExpiredSessions() {
+  await sql`DELETE FROM admin_sessions WHERE expires_at <= NOW()`;
 }
 
 async function close() { await sql.end(); }
 
-module.exports = { migrate, getCursor, setCursor, insertLock, markClaimed, markExtended, insertEvent, getLocks, getOpenLocks, getStats, close };
+module.exports = {
+  migrate, getCursor, setCursor, insertLock, markClaimed, markExtended, insertEvent,
+  getLocks, getOpenLocks, getStats, close,
+  listWhitelist, upsertWhitelist, removeWhitelist,
+  listApplications, getApplication, getApplicationByMaster, insertApplication, decideApplication,
+  createSession, getSession, deleteSession, purgeExpiredSessions,
+};
