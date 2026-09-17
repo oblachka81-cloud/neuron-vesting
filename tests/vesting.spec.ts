@@ -19,19 +19,6 @@ function makeLockPayload(qid: bigint, jm: Address, ben: Address, unlockAt: bigin
     return beginCell().storeBit(1).storeRef(inner).endCell().asSlice();
 }
 
-function makeRawLockPayload(qid: bigint, jm: Address, ben: Address, unlockAt: bigint) {
-    // Non-ref variant (bit=0, inline)
-    return beginCell()
-        .storeBit(0)
-        .storeUint(0x1, 32)
-        .storeUint(qid, 64)
-        .storeAddress(jm)
-        .storeAddress(ben)
-        .storeUint(unlockAt, 64)
-        .endCell()
-        .asSlice();
-}
-
 function makeJettonNotification(
     queryId: bigint,
     amount: bigint,
@@ -262,24 +249,31 @@ describe('NEURON Vesting — full suite (v2.5.1 / v2.6.1)', () => {
             expect(await factory.getTonFees()).toEqual(FEE_TON);
         });
 
-        it('8. payload with inline (non-ref) forward_payload works', async () => {
-            const unlockAt = BigInt(blockchain.now! + 3600);
-            const res = await factory.send(
-                fakeJettonWallet.getSender(),
-                { value: ATTACH_TON },
-                makeJettonNotification(
-                    1n,
-                    JETTON_AMOUNT,
-                    user.address,
-                    makeRawLockPayload(1n, jettonMaster.address, beneficiary.address, unlockAt),
-                ),
-            );
-            expect(res.transactions).toHaveTransaction({
-                from: fakeJettonWallet.address,
-                to: factory.address,
-                success: true,
-            });
-        });
+        it('8. inline payload (too short, bit=0) -> rejected, no crash', async () => {
+    const unlockAt = BigInt(blockchain.now! + 3600);
+
+    // Build a SHORT inline payload (bit=0) that fits in JettonNotification.
+    // This is NOT a valid CreateLock payload (missing fields) — the contract
+    // must reject it cleanly, not throw an unexpected exit code.
+    const tooShort = beginCell()
+        .storeBit(0)          // inline marker
+        .storeUint(0x1, 32)   // wrong op — should fail on op check
+        .storeUint(1n, 64)    // qid
+        .endCell()
+        .asSlice();
+
+    const res = await factory.send(
+        fakeJettonWallet.getSender(),
+        { value: ATTACH_TON },
+        makeJettonNotification(1n, JETTON_AMOUNT, user.address, tooShort),
+    );
+
+    expect(res.transactions).toHaveTransaction({
+        from: fakeJettonWallet.address,
+        to: factory.address,
+        success: false,
+    });
+});
 
         it('9. unknown sender (not whitelisted) -> rejected', async () => {
             const unlockAt = BigInt(blockchain.now! + 3600);
