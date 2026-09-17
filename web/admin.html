@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NEURON Vesting — Admin</title>
+  <style>
+    body { background: #0d0d0d; color: #eee; font-family: system-ui, sans-serif; margin: 0; padding: 16px; }
+    .card { background: #16161c; border: 1px solid #2a2a2a; border-radius: 10px; padding: 16px; margin-bottom: 14px; }
+    h1 { font-size: 22px; } h2 { font-size: 17px; margin: 0 0 10px; }
+    input, textarea, select { width: 100%; box-sizing: border-box; padding: 8px; background: #101014; color: #fff; border: 1px solid #333; border-radius: 6px; margin: 4px 0 10px; }
+    button { background: #2d6a4f; color: #fff; border: none; padding: 8px 14px; border-radius: 6px; cursor: pointer; margin-right: 6px; }
+    button.red { background: #8b2635; } button.gray { background: #444; }
+    .hidden { display: none; }
+    .pill { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; }
+    .pill.pending { background: #6b5b1e; } .pill.approved { background: #2d6a4f; } .pill.rejected { background: #8b2635; }
+    pre { background: #101014; padding: 8px; border-radius: 6px; white-space: pre-wrap; word-break: break-all; font-size: 11px; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    td, th { border-bottom: 1px solid #2a2a2a; padding: 6px 4px; text-align: left; }
+    .ok { color: #7ee2a8; } .err { color: #ff8a8a; } .hint { color: #999; font-size: 12px; }
+    a { color: #6cb4ff; }
+  </style>
+</head>
+<body>
+  <h1>🛡️ NEURON Vesting — Admin</h1>
+
+  <div class="card" id="login-box">
+    <h2>Admin login</h2>
+    <input id="pass" type="password" placeholder="passphrase" />
+    <button id="btn-login">Login</button>
+    <p id="login-status" class="hint"></p>
+  </div>
+
+  <div id="main" class="hidden">
+    <div class="card">
+      <button class="gray" id="btn-logout">Logout</button>
+      <button class="gray" id="btn-reload">↻ Refresh all</button>
+      <span id="who" class="hint"></span>
+    </div>
+
+    <div class="card">
+      <h2>Whitelist applications</h2>
+      <div id="queue"><p class="hint">Loading...</p></div>
+    </div>
+
+    <div class="card">
+      <h2>Fees</h2>
+      <div id="fees"><p class="hint">Loading...</p></div>
+      <h2>Withdraw jetton fees</h2>
+      <input id="wf-master" placeholder="jetton master (EQ...)" />
+      <input id="wf-amount" type="number" placeholder="amount (jettons)" />
+      <input id="wf-dest" placeholder="destination wallet (EQ...)" />
+      <button id="btn-wf">Build withdraw link</button>
+      <h2>Withdraw TON fees</h2>
+      <input id="wt-amount" type="number" placeholder="amount (TON)" />
+      <input id="wt-dest" placeholder="destination wallet (EQ...)" />
+      <button id="btn-wt">Build withdraw link</button>
+      <div id="withdraw-out"></div>
+    </div>
+
+    <div class="card">
+      <h2>On-chain events</h2>
+      <div id="events"><p class="hint">Loading...</p></div>
+    </div>
+  </div>
+
+  <script type="module" src="/src/admin.ts"></script>
+</body>
+</html>
