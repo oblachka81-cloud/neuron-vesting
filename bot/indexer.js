@@ -1,4 +1,4 @@
-// bot/indexer.js — polls factory + lockup wallets WITHOUT lt/hash pagination (dedupe by lt)
+// bot/indexer.js — polls factory + lockup wallets, parses v2.1 events
 BigInt.prototype.toJSON = function () { return this.toString(); };
 
 const { Address } = require('@ton/core');
@@ -20,6 +20,10 @@ function parseEvent(body) {
   if (op === 0x100) return { type: 'LockCreated', lock_id: Number(s.loadUintBig(64)), creator: s.loadAddress().toString(), beneficiary: s.loadAddress().toString(), jetton: s.loadAddress().toString(), amount: s.loadCoins().toString(), unlock_at: Number(s.loadUintBig(64)) };
   if (op === 0x101) return { type: 'Claimed', lock_id: Number(s.loadUintBig(64)), amount: s.loadCoins().toString(), beneficiary: s.loadAddress().toString() };
   if (op === 0x102) return { type: 'Extended', lock_id: Number(s.loadUintBig(64)), old_unlock_at: Number(s.loadUintBig(64)), new_unlock_at: Number(s.loadUintBig(64)) };
+  if (op === 0x103) return { type: 'WalletVerified', lock_id: Number(s.loadUintBig(64)), wallet: s.loadAddress().toString() };
+  if (op === 0x104) return { type: 'WithdrawBounced', query_id: Number(s.loadUintBig(64)), amount: s.loadCoins().toString() };
+  if (op === 0x105) return { type: 'ClaimBounced', lock_id: Number(s.loadUintBig(64)), amount: s.loadCoins().toString() };
+  if (op === 0x106) return { type: 'TonFeeCollected', lock_id: Number(s.loadUintBig(64)), amount: s.loadCoins().toString() };
   return null;
 }
 
@@ -66,14 +70,14 @@ async function pollWallets() {
         for (const msg of tx.outMessages.values()) {
           if (msg.info.type !== 'external-out') continue;
           const ev = parseEvent(msg.body);
-          if (!ev || (ev.type !== 'Claimed' && ev.type !== 'Extended')) continue;
+          if (!ev) continue;
           const key = eventKey(lock.lockup_wallet, tx.lt, ev.type);
           if (seen.has(key)) continue;
           seen.add(key);
-          await db.insertEvent({ lock_id: ev.lock_id, event_type: ev.type, event_data: ev, tx_hash: key });
+          await db.insertEvent({ lock_id: ev.lock_id || 0, event_type: ev.type, event_data: ev, tx_hash: key });
           if (ev.type === 'Claimed') await db.markClaimed(ev.lock_id, ev.amount);
           if (ev.type === 'Extended') await db.markExtended(ev.lock_id, ev.new_unlock_at);
-          console.log('Indexed', ev.type, '#' + ev.lock_id);
+          console.log('Indexed', ev.type, '#' + (ev.lock_id || 0));
         }
       }
       await new Promise((r) => setTimeout(r, 300));
