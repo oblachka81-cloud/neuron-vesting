@@ -15,8 +15,6 @@ contract LockupFactory {
     init(treasury: Address) {
         self.next_id = 1;
         self.treasury = treasury;
-        self.pending_withdraw = 0;
-        self.pending_jetton = null;
         self.ton_fees = 0;
     }
 
