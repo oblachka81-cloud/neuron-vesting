@@ -5,80 +5,148 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>NEURON Vesting — Testnet</title>
     <link rel="stylesheet" href="/src/style.css" />
+    <style>
+      .tabs { display: flex; gap: 4px; border-bottom: 1px solid #333; margin: 16px 0; flex-wrap: wrap; }
+      .tabs button {
+        background: transparent; border: 1px solid #333; color: #ccc;
+        padding: 8px 14px; cursor: pointer; border-radius: 6px 6px 0 0; font-size: 14px;
+      }
+      .tabs button.active { background: #1f1f1f; color: #fff; border-bottom-color: #1f1f1f; }
+      [data-panel] { display: none; }
+      [data-panel].active { display: block; }
+      .lock-card {
+        background: #1a1a1a; border: 1px solid #333; border-radius: 8px;
+        padding: 12px; margin-bottom: 8px;
+      }
+      .lock-head { font-size: 15px; margin-bottom: 6px; }
+      .lock-head code { background: #222; padding: 2px 6px; border-radius: 4px; }
+      .lock-status { font-size: 14px; color: #bbb; margin-bottom: 6px; }
+      .lock-foot { font-size: 12px; color: #777; }
+      .lock-foot a { color: #6cb4ff; }
+      .btn-claim {
+        background: #2d6a4f; color: white; border: none; padding: 4px 12px;
+        border-radius: 4px; cursor: pointer; margin-left: 8px; font-size: 13px;
+      }
+      .btn-claim:hover { background: #40916c; }
+      .timer { font-family: monospace; color: #ffd43b; }
+      #app-form label { display: block; margin-bottom: 10px; }
+      #app-form input, #app-form textarea {
+        width: 100%; padding: 8px; background: #1a1a1a; color: #fff;
+        border: 1px solid #333; border-radius: 4px; margin-top: 4px;
+      }
+      #app-form textarea { min-height: 60px; resize: vertical; }
+    </style>
   </head>
   <body>
     <script>
-  function nvBanner(text, color) {
-    if (document.querySelectorAll('.nv-banner').length >= 3) return;
-    var d = document.createElement('pre');
-    d.className = 'nv-banner';
-    d.style.cssText = 'color:' + color + ';background:#111;padding:10px;white-space:pre-wrap;border:1px solid ' + color + ';margin:8px;font-size:12px';
-    d.textContent = text;
-    document.body.prepend(d);
-  }
-  window.addEventListener('error', function (e) {
-    if (!e.message || e.message.indexOf('Script error') === 0) return;
-    nvBanner('JS ERROR: ' + e.message + ' @ ' + (e.filename || '') + ':' + (e.lineno || ''), '#ff6b6b');
-  });
-  window.addEventListener('unhandledrejection', function (e) {
-    var msg = (e.reason && (e.reason.message || e.reason)) || '';
-    if (!msg || String(msg).indexOf('Script error') === 0) return;
-    nvBanner('JS REJECTION: ' + msg, '#ff6b6b');
-  });
-  setTimeout(function () {
-    var u = document.getElementById('unlockAt');
-    if (!u || !u.value) nvBanner('main.ts DID NOT BOOT: date field empty after 3s', '#ffd43b');
-  }, 3000);
-</script>
+      function nvBanner(text, color) {
+        if (document.querySelectorAll('.nv-banner').length >= 3) return;
+        var d = document.createElement('pre');
+        d.className = 'nv-banner';
+        d.style.cssText = 'color:' + color + ';background:#111;padding:10px;white-space:pre-wrap;border:1px solid ' + color + ';margin:8px;font-size:12px';
+        d.textContent = text;
+        document.body.prepend(d);
+      }
+      window.addEventListener('error', function (e) {
+        if (!e.message || e.message.indexOf('Script error') === 0) return;
+        nvBanner('JS ERROR: ' + e.message + ' @ ' + (e.filename || '') + ':' + (e.lineno || ''), '#ff6b6b');
+      });
+      window.addEventListener('unhandledrejection', function (e) {
+        var msg = (e.reason && (e.reason.message || e.reason)) || '';
+        if (!msg || String(msg).indexOf('Script error') === 0) return;
+        nvBanner('JS REJECTION: ' + msg, '#ff6b6b');
+      });
+      setTimeout(function () {
+        var u = document.getElementById('unlockAt');
+        if (!u || !u.value) nvBanner('main.ts DID NOT BOOT: date field empty after 3s', '#ffd43b');
+      }, 3000);
+    </script>
+
     <header>
       <h1>🔐 NEURON Vesting</h1>
       <p class="subtitle">Lock any TEP-74 jetton with public on-chain proof · testnet</p>
       <div id="ton-connect"></div>
     </header>
 
+    <nav class="tabs">
+      <button data-tab="wizard" class="active">Create Lock</button>
+      <button data-tab="locks">My Locks</button>
+      <button data-tab="apps">My Applications</button>
+      <button data-tab="whitelist">Whitelist</button>
+    </nav>
+
     <main>
-      <section class="card" id="factory-status">
-        <h2>Factory</h2>
-        <code>kQAhTRlJwkdR2vYdXz-RowoEGum_ITUZZFj6gdKdSggfjnNh</code>
-        <p class="hint">
-          <a href="https://testnet.tonviewer.com/kQAhTRlJwkdR2vYdXz-RowoEGum_ITUZZFj6gdKdSggfjnNh" target="_blank" rel="noopener">
-            open in explorer ↗
-          </a>
-        </p>
+      <section data-panel="wizard" class="active">
+        <section class="card" id="factory-status">
+          <h2>Factory</h2>
+          <code>kQAhTRlJwkdR2vYdXz-RowoEGum_ITUZZFj6gdKdSggfjnNh</code>
+          <p class="hint">
+            <a href="https://testnet.tonviewer.com/kQAhTRlJwkdR2vYdXz-RowoEGum_ITUZZFj6gdKdSggfjnNh" target="_blank" rel="noopener">open in explorer ↗</a>
+          </p>
+        </section>
+
+        <section class="card" id="create-lock">
+          <h2>Create a Lock</h2>
+          <form id="lock-form">
+            <label>Jetton master (TEP-74, testnet)
+              <input id="jettonMaster" type="text" placeholder="kQ..." required />
+            </label>
+            <label>Amount (jettons, NOT nano)
+              <input id="amount" type="number" min="0.01" step="0.01" value="10" required />
+            </label>
+            <label>Beneficiary address
+              <input id="beneficiary" type="text" placeholder="kQ..." required />
+            </label>
+            <label>Unlock date &amp; time (UTC)
+              <input id="unlockAt" type="datetime-local" required />
+            </label>
+            <p class="hint" style="color:#ffd43b">💡 Fee: 0.5% in jetton + 1 TON platform. Gas ≈ 1.6 TON.</p>
+            <button type="submit" id="submit-btn" disabled>Connect wallet first</button>
+            <p id="status" class="status"></p>
+          </form>
+        </section>
+
+        <section class="card" id="how-it-works">
+          <h2>How it works</h2>
+          <ol>
+            <li>You approve a JettonTransfer from <b>your</b> jetton wallet to the factory</li>
+            <li>Payload carries <code>CreateLock</code> (TEP-74, bit 1 + ref)</li>
+            <li>Factory takes 0.5% fee + 1 TON, deploys a new <b>LockupWallet</b> for you</li>
+            <li>After <code>unlock_at</code>, beneficiary taps Claim → jettons arrive</li>
+          </ol>
+        </section>
       </section>
 
-      <section class="card" id="create-lock">
-        <h2>Create a Lock</h2>
-        <form id="lock-form">
-          <label>
-            Jetton master (TEP-74, testnet)
-            <input id="jettonMaster" type="text" placeholder="kQ..." required />
-          </label>
-          <label>
-            Amount (jettons, NOT nano)
-            <input id="amount" type="number" min="0.01" step="0.01" value="10" required />
-          </label>
-          <label>
-            Beneficiary address
-            <input id="beneficiary" type="text" placeholder="kQ..." required />
-          </label>
-          <label>
-            Unlock date &amp; time (UTC)
-            <input id="unlockAt" type="datetime-local" required />
-          </label>
-          <button type="submit" id="submit-btn" disabled>Connect wallet first</button>
-          <p id="status" class="status"></p>
-        </form>
+      <section data-panel="locks">
+        <section class="card">
+          <h2>My Locks <button id="btn-refresh-locks" style="font-size:12px;padding:2px 8px;background:#333;color:#fff;border:none;border-radius:4px;cursor:pointer;margin-left:8px">↻</button></h2>
+          <div id="locks-list"><p class="hint">Connect wallet to see your locks</p></div>
+        </section>
       </section>
 
-      <section class="card" id="how-it-works">
-        <h2>How it works</h2>
-        <ol>
-          <li>You approve a JettonTransfer from <b>your</b> jetton wallet to the factory</li>
-          <li>Payload carries <code>CreateLock</code> (TEP-74, bit 1 + ref)</li>
-          <li>Factory takes 0.5% fee, deploys a new <b>LockupWallet</b> for you</li>
-          <li>After <code>unlock_at</code>, beneficiary taps Claim → jettons arrive</li>
-        </ol>
+      <section data-panel="apps">
+        <section class="card">
+          <h2>Submit whitelist application</h2>
+          <form id="app-form">
+            <label>Jetton master address<input id="app-jm" type="text" placeholder="EQ..." required /></label>
+            <label>Project name<input id="app-name" type="text" required /></label>
+            <label>Project URL<input id="app-url" type="text" placeholder="https://..." /></label>
+            <label>Notes<textarea id="app-notes" placeholder="Optional"></textarea></label>
+            <button type="submit">Submit application</button>
+            <p id="app-status" class="status"></p>
+          </form>
+        </section>
+        <section class="card">
+          <h2>My applications</h2>
+          <div id="apps-list"><p class="hint">Connect wallet</p></div>
+        </section>
+      </section>
+
+      <section data-panel="whitelist">
+        <section class="card">
+          <h2>Approved jettons</h2>
+          <div id="whitelist-list"><p class="hint">Loading...</p></div>
+        </section>
       </section>
     </main>
 
