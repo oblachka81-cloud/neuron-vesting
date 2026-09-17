@@ -4,7 +4,7 @@ import { mnemonicToPrivateKey } from '@ton/crypto';
 import { Address, beginCell, toNano } from '@ton/core';
 import { LockupFactory } from '../build/LockupFactory_LockupFactory';
 
-const TREASURY = 'UQBniD_M-MTeVqUbWshZrXdQcz0m8lPstG3mQg1AL5KKCGSv';
+const TREASURY = 'EQAODQiP22xLiu_ZGxCfaY6o358FX4-G9bE8D_DTKVzjWwEl';
 const COGNIQ_MASTER = 'EQDOjRZ5rbSnBBvhsv4g0JNN67p89617_2pNc_AO1dTEkaNg';
 
 async function main() {
