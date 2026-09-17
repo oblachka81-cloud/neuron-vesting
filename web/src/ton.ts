@@ -23,7 +23,7 @@ export async function getUserJettonWallet(jettonMaster: Address, owner: Address)
 }
 
 // TODO: verify against lockup_wallet.tact — пока placeholder
-const CLAIM_OP = 0x17a49c59;
+const CLAIM_OP = 0x10;
 
 export function buildClaimBody(queryId: bigint) {
   return beginCell().storeUint(CLAIM_OP, 32).storeUint(queryId, 64).endCell();
