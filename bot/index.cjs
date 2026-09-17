@@ -30,7 +30,7 @@ const server = http.createServer(async (req, res) => {
   res.writeHead(302, { Location: MINI_APP_URL });
   res.end();
 });
-server.listen(PORT, () => console.log(`HTTP server on port ${PORT}`));
+server.listen(PORT, '0.0.0.0', () => console.log(`HTTP server on port ${PORT} (all interfaces)`));
 
 let offset = 0;
 async function call(method, params) {
