@@ -40,7 +40,7 @@ contract LockupFactory {
         require(unlock_at > now(), "past date");
 
         // v2.1: require platform fee (1 TON) + gas buffer (0.25 TON)
-        require(msg.value >= ton("1.25"), "attach 1.25 TON");
+        require(context().value >= ton("1.25"), "attach 1.25 TON");
         self.ton_fees = self.ton_fees + ton("1");
 
         // v2: only whitelisted jetton, and only from its registered factory wallet
