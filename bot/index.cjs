@@ -1,4 +1,4 @@
-// bot/index.cjs — NEURON Vesting bot + indexer + API
+// bot/index.cjs — NEURON Vesting bot + indexer + API (v4)
 const http = require('http');
 const TOKEN = (process.env.BOT_TOKEN || '').trim();
 if (!TOKEN) { console.error('BOT_TOKEN is not set'); process.exit(1); }
@@ -11,26 +11,28 @@ const PORT = parseInt(process.env.PORT || '3000', 10);
 const db = require('./db');
 const indexer = require('./indexer');
 const api = require('./api');
+const auth = require('./auth');
 
-// ===== HTTP-сервер (бот + API) =====
 const server = http.createServer(async (req, res) => {
   if (req.url === '/health') {
     const stats = await db.getStats();
+    const whitelist = await db.listWhitelist();
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ ok: true, bot: 'NEURON Vesting', factory: FACTORY, ...stats }));
+    res.end(JSON.stringify({
+      ok: true, bot: 'NEURON Vesting', factory: FACTORY,
+      whitelist_count: whitelist.length,
+      admin_login_enabled: !!process.env.ADMIN_PASSPHRASE,
+      ...stats,
+    }));
     return;
   }
-  
   if (api.addRoutes(req, res)) return;
-  
   res.writeHead(302, { Location: MINI_APP_URL });
   res.end();
 });
 server.listen(PORT, () => console.log(`HTTP server on port ${PORT}`));
 
-// ===== Telegram bot (long polling) =====
 let offset = 0;
-
 async function call(method, params) {
   const res = await fetch(API + '/' + method, {
     method: 'POST',
@@ -48,6 +50,8 @@ function menuKeyboard() {
       [{ text: 'Открыть NEURON Vesting', web_app: { url: MINI_APP_URL } }],
       [{ text: 'Статус фабрики', callback_data: 'status' }],
       [{ text: 'Мои локи', callback_data: 'locks' }],
+      [{ text: 'Whitelist жетонов', callback_data: 'whitelist' }],
+      [{ text: 'Подать заявку', callback_data: 'apply' }],
     ],
   };
 }
@@ -59,7 +63,7 @@ async function handle(update) {
     if (text.startsWith('/start')) {
       await call('sendMessage', {
         chat_id: chat,
-        text: 'NEURON Vesting — non-custodial локи токенов в TON.\n\nЗалокируй любой TEP-74 jetton с публичным on-chain доказательством.',
+        text: 'NEURON Vesting — non-custodial локи токенов в TON.\n\nЗалокируй любой одобренный TEP-74 jetton с публичным on-chain доказательством.',
         reply_markup: menuKeyboard(),
       });
     } else {
@@ -69,15 +73,22 @@ async function handle(update) {
   if (update.callback_query) {
     const cq = update.callback_query;
     await call('answerCallbackQuery', { callback_query_id: cq.id });
+    const chat = cq.message.chat.id;
     if (cq.data === 'status') {
-      await call('sendMessage', {
-        chat_id: cq.message.chat.id,
-        text: 'Фабрика (testnet):\n' + FACTORY + '\n\nExplorer:\nhttps://testnet.tonviewer.com/' + FACTORY,
-      });
+      await call('sendMessage', { chat_id: chat, text: 'Фабрика:\n' + FACTORY });
     } else if (cq.data === 'locks') {
+      await call('sendMessage', { chat_id: chat, text: '🔧 Вкладка "My Locks" появится в веб-аппе!' });
+    } else if (cq.data === 'whitelist') {
+      const list = await db.listWhitelist();
+      const text = list.length === 0
+        ? 'Список одобренных жетонов пока пуст.'
+        : list.map((j) => `• ${j.symbol || '?'} — ${j.name || j.jetton_master}`).join('\n');
+      await call('sendMessage', { chat_id: chat, text: 'Whitelist:\n' + text });
+    } else if (cq.data === 'apply') {
       await call('sendMessage', {
-        chat_id: cq.message.chat.id,
-        text: '🔧 Вкладка "My Locks" скоро появится в веб-аппе!',
+        chat_id: chat,
+        text: 'Заявка на whitelist жетона:\n\nОтправь одним сообщением:\n`/apply EQ…master <название> <тикер>`\n\nНапример:\n`/apply EQDOjRZ5... COGNIQ "COGNIQ Token"`',
+        parse_mode: 'Markdown',
       });
     }
   }
@@ -98,7 +109,6 @@ async function botLoop() {
   }
 }
 
-// ===== Запуск =====
 db.migrate().then(() => {
   console.log('Database ready');
   indexer.loop();
@@ -107,6 +117,8 @@ db.migrate().then(() => {
     console.log('Bot started (long polling)');
     botLoop();
   });
+  // cleanup expired sessions every hour
+  setInterval(() => db.purgeExpiredSessions().catch(() => {}), 3600 * 1000);
 }).catch((e) => {
   console.error('Startup failed:', e);
   process.exit(1);
