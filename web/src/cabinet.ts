@@ -53,9 +53,12 @@ function lockCard(l: Lock) {
   const amt = (BigInt(l.amount) / 10n ** 9n).toString();
   let status: string;
   if (l.status === 'claimed') status = '✅ received';
-  else if (l.status === 'ready') {
-    status = `⏰ <span data-timer="${l.unlock_at}" class="timer">ready</span>
-      <button class="btn-claim" data-claim data-lock-id="${l.lock_id}" data-wallet="${l.lockup_wallet}">Claim</button>`;
+  } else if (l.status === 'ready') {
+    const isBen = currentWallet && l.beneficiary.toLowerCase() === currentWallet.toLowerCase();
+    const claimBtn = isBen
+      ? `<button class="btn-claim" data-claim data-lock-id="${l.lock_id}" data-wallet="${l.lockup_wallet}">Claim</button>`
+      : `<span class="hint" style="margin-left:8px">(claim for beneficiary only)</span>`;
+    status = `⏰ <span data-timer="${l.unlock_at}" class="timer">ready</span>${claimBtn}`;
   } else {
     status = `🔒 unlocks in <span data-timer="${l.unlock_at}" class="timer"></span>`;
   }
