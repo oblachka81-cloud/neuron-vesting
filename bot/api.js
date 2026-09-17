@@ -1,7 +1,59 @@
-// bot/api.js — REST API for locks + whitelist + admin panel (v4)
+// bot/api.js — REST API: locks, whitelist, applications, admin, jetton icons (v5)
 const db = require('./db');
 const auth = require('./auth');
+const { Cell } = require('@ton/core');
 
+// ===== jetton icon resolver (server-side: no CORS problems, toncenter key used) =====
+const iconCache = new Map();
+
+function epFor(addr) {
+  const main = addr.startsWith('EQ') || addr.startsWith('UQ') || addr.startsWith('Ef') || addr.startsWith('Uf');
+  return main ? 'https://toncenter.com/api/v2/jsonRPC'
+              : 'https://testnet.toncenter.com/api/v2/jsonRPC';
+}
+
+function readSnake(cs) {
+  const bytes = [];
+  let cur = cs;
+  for (;;) {
+    while (cur.remainingBits >= 8) bytes.push(cur.loadUint(8));
+    if (cur.remainingRefs > 0) cur = cur.loadRef().beginParse();
+    else break;
+  }
+  return Buffer.from(bytes).toString('utf8').replace(/\0+$/, '');
+}
+
+async function getJettonIcon(master) {
+  const hit = iconCache.get(master);
+  if (hit && Date.now() - hit.t < 3600000) return hit.image;
+  const res = await fetch(epFor(master), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(process.env.TONCENTER_API_KEY ? { 'X-API-Key': process.env.TONCENTER_API_KEY } : {}),
+    },
+    body: JSON.stringify({
+      id: '1', jsonrpc: '2.0', method: 'runGetMethod',
+      params: { address: master, method: 'get_jetton_data', stack: [] },
+    }),
+  });
+  const j = await res.json();
+  if (!j.ok) throw new Error(j.error || 'toncenter error');
+  const contentCell = Cell.fromBoc(Buffer.from(j.result.stack[3][1].bytes, 'base64'))[0];
+  const cs = contentCell.beginParse();
+  const prefix = cs.loadUint(8);
+  let image = null;
+  if (prefix === 0) {
+    const uri = readSnake(cs);
+    const mres = await fetch(uri);
+    const mj = await mres.json();
+    image = mj.image || null;
+  }
+  iconCache.set(master, { t: Date.now(), image });
+  return image;
+}
+
+// ===== helpers =====
 function readBody(req) {
   return new Promise((resolve, reject) => {
     const chunks = [];
@@ -16,12 +68,12 @@ function json(res, code, body) {
   res.end(JSON.stringify(body));
 }
 
+// ===== routes =====
 async function addRoutes(req, res) {
   const url = new URL(req.url, 'http://localhost');
   const path = url.pathname;
 
-  // ==== Public endpoints ====
-
+  // ---- public ----
   if (path === '/api/stats' && req.method === 'GET') {
     try { return json(res, 200, await db.getStats()); }
     catch (e) { return json(res, 500, { error: e.message }); }
@@ -39,8 +91,15 @@ async function addRoutes(req, res) {
     catch (e) { return json(res, 500, { error: e.message }); }
   }
 
-  // ==== Applicant endpoints (public: submit an application, check status) ====
+  const iconMatch = path.match(/^\/api\/jetton\/([^/]+)\/icon$/);
+  if (iconMatch && req.method === 'GET') {
+    try {
+      const image = await getJettonIcon(decodeURIComponent(iconMatch[1]));
+      return json(res, 200, { image });
+    } catch (e) { return json(res, 200, { image: null }); }
+  }
 
+  // ---- applicant ----
   if (path === '/api/applications' && req.method === 'POST') {
     try {
       const body = JSON.parse(await readBody(req));
@@ -68,8 +127,7 @@ async function addRoutes(req, res) {
     } catch (e) { return json(res, 500, { error: e.message }); }
   }
 
-  // ==== Admin: auth ====
-
+  // ---- admin: auth ----
   if (path === '/api/admin/login' && req.method === 'POST') {
     try {
       const body = JSON.parse(await readBody(req));
@@ -91,8 +149,7 @@ async function addRoutes(req, res) {
     return json(res, 200, { ok: true });
   }
 
-  // ==== Admin: applications ====
-
+  // ---- admin: data ----
   if (path === '/api/admin/applications' && req.method === 'GET') {
     const s = await auth.requireAdmin(req, res); if (!s) return;
     const status = url.searchParams.get('status') || null;
@@ -115,7 +172,7 @@ async function addRoutes(req, res) {
         applicant: app.applicant,
         metadata: body.metadata || {},
       });
-      return json(res, 200, { ok: true, note: 'On-chain whitelist SetJettonWallet must be signed from treasury separately.' });
+      return json(res, 200, { ok: true, note: 'On-chain SetJettonWallet must be signed from treasury separately.' });
     } catch (e) { return json(res, 500, { error: e.message }); }
   }
 
@@ -128,13 +185,12 @@ async function addRoutes(req, res) {
     } catch (e) { return json(res, 500, { error: e.message }); }
   }
 
-  // ==== Admin: fees & stats ====
-
   if (path === '/api/admin/stats' && req.method === 'GET') {
     const s = await auth.requireAdmin(req, res); if (!s) return;
     try { return json(res, 200, await db.getStats()); }
     catch (e) { return json(res, 500, { error: e.message }); }
   }
+
   if (path === '/api/admin/events' && req.method === 'GET') {
     const s = await auth.requireAdmin(req, res); if (!s) return;
     try { return json(res, 200, { events: await db.listEvents(50) }); }
