@@ -53,7 +53,7 @@ function lockCard(l: Lock) {
   const amt = (BigInt(l.amount) / 10n ** 9n).toString();
   let status: string;
   if (l.status === 'claimed') status = '✅ received';
-  } else if (l.status === 'ready') {
+  else if (l.status === 'ready') {
     const isBen = currentWallet && l.beneficiary.toLowerCase() === currentWallet.toLowerCase();
     const claimBtn = isBen
       ? `<button class="btn-claim" data-claim data-lock-id="${l.lock_id}" data-wallet="${l.lockup_wallet}">Claim</button>`
