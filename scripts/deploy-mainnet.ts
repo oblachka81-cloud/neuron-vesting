@@ -66,9 +66,13 @@ async function main() {
             })],
         });
         for (let i = 0; i < 30; i++) {
-            await new Promise((r) => setTimeout(r, 3000));
-            if (await client.isContractDeployed(factory.address)) break;
-        }
+    await new Promise((r) => setTimeout(r, 5000));  // 5 сек вместо 3
+    try {
+        if (await client.isContractDeployed(factory.address)) break;
+    } catch (e) {
+        console.log('Polling retry...', (e as Error).message);
+    }
+}
         if (!(await client.isContractDeployed(factory.address))) throw new Error('Not active after 90s');
         console.log('FACTORY DEPLOYED ✅');
     } else {
