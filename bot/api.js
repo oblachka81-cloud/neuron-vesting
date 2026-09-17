@@ -135,6 +135,11 @@ async function addRoutes(req, res) {
     try { return json(res, 200, await db.getStats()); }
     catch (e) { return json(res, 500, { error: e.message }); }
   }
+  if (path === '/api/admin/events' && req.method === 'GET') {
+    const s = await auth.requireAdmin(req, res); if (!s) return;
+    try { return json(res, 200, { events: await db.listEvents(50) }); }
+    catch (e) { return json(res, 500, { error: e.message }); }
+  }
 
   return false;
 }
