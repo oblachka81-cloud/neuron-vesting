@@ -1,4 +1,4 @@
-// NEURON Vesting — factory v2: whitelisted jettons, creator from notification, bounce-safe
+// NEURON Vesting — factory v2.1: whitelisted jettons, creator from notification, bounce-safe, 1 TON platform fee
 
 import "@stdlib/deploy";
 import "./lockup_wallet";
@@ -10,12 +10,14 @@ contract LockupFactory {
     own_wallets: map<Address, Address>;
     pending_withdraw: Int as coins;
     pending_jetton: Address?;
+    ton_fees: Int as coins;
 
     init(treasury: Address) {
         self.next_id = 1;
         self.treasury = treasury;
         self.pending_withdraw = 0;
         self.pending_jetton = null;
+        self.ton_fees = 0;
     }
 
     // Treasury approves a jetton: registers factory's jetton wallet for this master
@@ -36,6 +38,10 @@ contract LockupFactory {
         let ben: Address = sc.loadAddress();
         let unlock_at: Int = sc.loadUint(64);
         require(unlock_at > now(), "past date");
+
+        // v2.1: require platform fee (1 TON) + gas buffer (0.25 TON)
+        require(msg.value >= ton("1.25"), "attach 1.25 TON");
+        self.ton_fees = self.ton_fees + ton("1");
 
         // v2: only whitelisted jetton, and only from its registered factory wallet
         let known: Address? = self.own_wallets.get(jm);
@@ -90,6 +96,8 @@ contract LockupFactory {
             amount: lock_amount,
             unlock_at: unlock_at
         }.toCell());
+
+        emit(TonFeeCollected{ lock_id: id, amount: ton("1") }.toCell());
     }
 
     // Treasury withdraws accumulated jetton fees
@@ -130,6 +138,19 @@ contract LockupFactory {
         }
     }
 
+    // Treasury withdraws accumulated TON platform fees
+    receive(msg: WithdrawTonFees) {
+        require(sender() == self.treasury, "not treasury");
+        require(self.ton_fees >= msg.amount, "not enough ton fees");
+        self.ton_fees = self.ton_fees - msg.amount;
+        send(SendParameters{
+            to: msg.destination,
+            value: msg.amount,
+            mode: SendPayGasSeparately,
+            body: emptyCell()
+        });
+    }
+
     receive() { }
 
     get fun nextLockId(): Int { return self.next_id; }
@@ -137,6 +158,19 @@ contract LockupFactory {
         let f: Int? = self.fees.get(jetton);
         return f != null ? f!! : 0;
     }
+    get fun tonFees(): Int { return self.ton_fees; }
     get fun treasuryAddress(): Address { return self.treasury; }
     get fun walletOf(jetton: Address): Address? { return self.own_wallets.get(jetton); }
+}
+
+// ===== Messages (append after contract or before, Tact is order-agnostic for messages) =====
+message(0x22) WithdrawTonFees {
+    query_id: Int as uint64;
+    amount: Int as coins;
+    destination: Address;
+}
+
+message(0x106) TonFeeCollected {
+    lock_id: Int as uint64;
+    amount: Int as coins;
 }
