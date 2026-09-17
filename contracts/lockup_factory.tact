@@ -1,40 +1,45 @@
 // ═══════════════════════════════════════════════════════════════════════════
-// NEURON Vesting — LockupFactory v2.5 (Final)
+// NEURON Vesting — LockupFactory v2.5.1 (Final)
 // ───────────────────────────────────────────────────────────────────────────
 // Singleton factory. Receives jetton transfers with CreateLock payload,
 // deploys per-lock LockupWallet instances, forwards locked jettons.
 // Also accumulates and lets treasury withdraw jetton & TON platform fees.
 //
+// Treasury-provided jetton wallet addresses (no deterministic computation).
+// See docs/SPEC.md for trust model and known limitations.
+//
 // Invariants:
-//   F1. next_id strictly increases, never reused
-//   F2. own_wallets[m] set  <=>  treasury approved master m
-//   F3. wallet_to_master[w] = m  <=>  own_wallets[m] = w  (bijection)
-//   F4. fees[m] = sum of all 0.5% cuts for master m, minus withdrawals
-//   F5. pending_withdraw[qid] and pending_jetton[qid] set/cleared together
-//   F6. used_qids monotonic: once true, never false
-//   F7. pending_create[qid] set at create, cleared on success or bounce
-//   F8. ton_fees >= 0 at all times
+//   F1.  next_id strictly increases, never reused
+//   F2.  own_wallets[m] set  <=>  treasury approved master m
+//   F3.  wallet_to_master[w] = m  <=>  own_wallets[m] = w  (bijection)
+//   F4.  fees[m] = sum of all 0.5% cuts for master m, minus withdrawals
+//   F5.  pending_withdraw[qid] and pending_jetton[qid] set/cleared together
+//   F6.  used_qids monotonic: once true, never false
+//   F7.  pending_create[qid] set at create, cleared on success or bounce
+//   F8.  create_jetton[qid] tracks master for refund on create bounce
+//   F9.  ton_fees >= 0 at all times
 //
 // Trust model:
 //   - treasury: trusted for whitelisting jettons and withdrawing fees.
 //     CANNOT steal locked tokens (they live in LockupWallet instances).
+//     A compromised treasury can DoS new lock creation by registering bad
+//     addresses — mitigated by off-chain verifier in CI and multi-sig.
 //   - any user: can create a lock by sending jettons to the factory.
-//   - creator: taken from JettonNotification.sender (original owner).
+//   - creator:  taken from JettonNotification.sender (original owner).
 //
 // Known limitations:
-//   L1. If a fee-withdrawal bounce is lost forever, pending_withdraw[qid]
-//       stays set and that query_id cannot be reused. Treasury picks a new
-//       query_id. No funds lost, only bookkeeping entries.
+//   L1. Lost fee-withdrawal bounce leaves pending_withdraw[qid] set forever.
+//       No funds lost; treasury simply uses a new query_id.
 //   L2. Overpay refund goes to msg.sender (original owner), not sender().
 //   L3. If a create-transfer to LockupWallet bounces, factory refunds the
 //       jettons to the creator and emits LockCreationFailed. The LockupWallet
 //       instance itself remains deployed but empty — it cannot be destroyed
-//       on-chain. Beneficiary should treat such a lock as invalid.
+//       on-chain. Frontends should filter locks whose lock_id appears in a
+//       LockCreationFailed event.
 // ═══════════════════════════════════════════════════════════════════════════
 
 import "@stdlib/deploy";
 import "./lockup_wallet";
-import "./jetton_wallet";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // TEP-74 messages
@@ -68,14 +73,14 @@ message(0x21) SetJettonWallet {
 }
 
 message(0x20) WithdrawFees {
-    query_id: Int as uint64;   // must be > 0, globally unique
+    query_id: Int as uint64;
     jetton_master: Address;
     destination_wallet: Address;
     amount: Int as coins;
 }
 
 message(0x22) WithdrawTonFees {
-    query_id: Int as uint64;   // must be > 0, globally unique
+    query_id: Int as uint64;
     amount: Int as coins;
     destination: Address;
 }
@@ -134,6 +139,11 @@ message(0x111) LockCreationFailed {
     amount: Int as coins;
 }
 
+message(0x112) CreateBounced {
+    lock_id: Int as uint64;
+    amount: Int as coins;
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Constants
 // ═══════════════════════════════════════════════════════════════════════════
@@ -159,20 +169,21 @@ contract LockupFactory {
     own_wallets: map<Address, Address>;       // jetton_master -> factory jetton wallet
     wallet_to_master: map<Address, Address>;  // factory jetton wallet -> jetton_master
 
-    // Fee accounting (F4, F8)
+    // Fee accounting (F4, F9)
     fees: map<Address, Int>;                  // jetton_master -> accumulated fee
     ton_fees: Int as coins;
 
     // Pending fee-withdrawal tracking (F5, F6)
-    pending_withdraw: map<Int, Int?>;         // query_id -> amount
-    pending_jetton: map<Int, Address?>;       // query_id -> jetton_master
+    pending_withdraw: map<Int, Int>;          // query_id -> amount
+    pending_jetton: map<Int, Address>;        // query_id -> jetton_master
     used_qids: map<Int, Bool>;                // query_id -> ever used
 
-    // Pending create-transfer tracking (F7)
-    pending_create: map<Int, Address?>;       // query_id -> child_addr
-    create_creator: map<Int, Address?>;       // query_id -> creator (for refunds)
-    create_amount: map<Int, Int?>;            // query_id -> lock_amount (for refunds)
-    create_beneficiary: map<Int, Address?>;   // query_id -> beneficiary (for event)
+    // Pending create-transfer tracking (F7, F8)
+    pending_create: map<Int, Address>;        // lock_id -> child_addr
+    create_creator: map<Int, Address>;        // lock_id -> creator
+    create_amount: map<Int, Int>;             // lock_id -> lock_amount
+    create_beneficiary: map<Int, Address>;    // lock_id -> beneficiary
+    create_jetton: map<Int, Address>;         // lock_id -> jetton_master
 
     init(treasury: Address) {
         self.next_id = 1;
@@ -188,15 +199,9 @@ contract LockupFactory {
         require(sender() == self.treasury, "not treasury");
         require(msg.query_id > 0, "query_id must be > 0");
 
-        // Deterministic check: the wallet address must match TEP-74 for our address.
-        let expected: Address = contractAddress(
-            initOf JettonWallet(myAddress(), msg.jetton_master)
-        );
-        require(msg.jetton_wallet == expected, "bad wallet addr");
-
-        // Allow set once; idempotent re-set with same value is fine.
+        // Idempotent: allow setting once, or re-setting to the same value.
         let cur: Address? = self.own_wallets.get(msg.jetton_master);
-        require(cur == null || cur!! == msg.jetton_wallet, "already set");
+        require(cur == null || cur!! == msg.jetton_wallet, "already set to different wallet");
 
         self.own_wallets.set(msg.jetton_master, msg.jetton_wallet);
         self.wallet_to_master.set(msg.jetton_wallet, msg.jetton_master);
@@ -213,19 +218,15 @@ contract LockupFactory {
 
     receive(msg: JettonNotification) {
         // Step 1: identify jetton master from reverse map — before parsing.
-        // Any malformed payload from non-whitelisted wallets never reaches
-        // the parser.
         let jm: Address? = self.wallet_to_master.get(sender());
         require(jm != null, "unknown jetton wallet");
         let jetton_master: Address = jm!!;
 
-        // Step 2: explicit whitelist guard — even though Step 1 implies it,
-        // we make the invariant F2 visible and fail fast.
+        // Step 2: explicit whitelist guard (F2).
         let factoryWallet: Address? = self.own_wallets.get(jetton_master);
         require(factoryWallet != null, "jetton not whitelisted");
 
-        // Step 3: enforce platform fee BEFORE parsing payload, so a
-        // malformed payload from an underfunded sender fails cleanly.
+        // Step 3: enforce platform fee BEFORE parsing payload.
         require(context().value >= PLATFORM_FEE_TON + GAS_BUFFER_TON, "attach 1.25 TON");
 
         // Step 4: parse forward payload.
@@ -245,7 +246,7 @@ contract LockupFactory {
         require(unlock_at <= now() + MAX_LOCK_DURATION, "unlock too far");
         require(qid > 0, "query_id must be > 0");
 
-        // Step 6: TON fee accounting + overpay refund to original owner.
+        // Step 6: TON fee accounting + overpay refund to original owner (L2).
         let overpay: Int = context().value - PLATFORM_FEE_TON - GAS_BUFFER_TON;
         self.ton_fees = self.ton_fees + PLATFORM_FEE_TON;
 
@@ -268,7 +269,7 @@ contract LockupFactory {
         let creator: Address = msg.sender;
         require(creator != myAddress(), "creator cannot be factory");
 
-        // Step 9: accumulate platform fee.
+        // Step 9: accumulate platform fee (F4).
         let currentFee: Int? = self.fees.get(jetton_master);
         self.fees.set(jetton_master, (currentFee != null ? currentFee!! : 0) + fee);
 
@@ -280,6 +281,7 @@ contract LockupFactory {
             id,
             myAddress(),
             jetton_master,
+            factoryWallet!!,
             ben,
             creator,
             lock_amount,
@@ -287,11 +289,12 @@ contract LockupFactory {
         );
         let childAddr: Address = contractAddress(childInit);
 
-        // Record pending create so we can refund on bounce (F7).
+        // Record pending create for bounce handling (F7, F8).
         self.pending_create.set(id, childAddr);
         self.create_creator.set(id, creator);
         self.create_amount.set(id, lock_amount);
         self.create_beneficiary.set(id, ben);
+        self.create_jetton.set(id, jetton_master);
 
         // Deploy child.
         send(SendParameters{
@@ -303,8 +306,7 @@ contract LockupFactory {
             body: emptyCell()
         });
 
-        // Forward jettons to child. Use the lock_id as JettonTransfer.query_id
-        // so we can correlate a bounce back to this specific create.
+        // Forward jettons to child. lock_id as query_id correlates a bounce.
         send(SendParameters{
             to: factoryWallet!!,
             value: TRANSFER_GAS,
@@ -341,14 +343,14 @@ contract LockupFactory {
         require(msg.query_id > 0, "query_id must be > 0");
         require(msg.amount > 0, "zero amount");
 
-        // Monotonic query_id namespace: reject reuse.
+        // Monotonic query_id namespace (F6).
         require(self.used_qids.get(msg.query_id) == null, "query_id reused");
 
         let cur: Int? = self.fees.get(msg.jetton_master);
         require(cur != null, "no fees yet");
         require(cur!! >= msg.amount, "not enough fees");
 
-        // Reserve the query_id BEFORE any send.
+        // Reserve qid BEFORE any send (F5).
         self.used_qids.set(msg.query_id, true);
         self.pending_withdraw.set(msg.query_id, msg.amount);
         self.pending_jetton.set(msg.query_id, msg.jetton_master);
@@ -383,16 +385,6 @@ contract LockupFactory {
     // ═══════════════════════════════════════════════════════════════════════
     // Bounce handler: distinguishes create-transfer vs fee-withdrawal
     // ═══════════════════════════════════════════════════════════════════════
-    //
-    // Both use JettonTransfer and arrive as bounced<JettonTransfer>. We
-    // disambiguate by query_id namespace:
-    //   - create-transfer: query_id = lock_id (small, monotonic, 1..next_id-1)
-    //   - fee-withdrawal:  query_id = treasury-chosen (must not collide with
-    //                      lock_ids). Treasury is instructed to use large
-    //                      monotonically increasing query_ids.
-    //
-    // To be robust, we check pending_create FIRST — if a lock_id matches,
-    // it's a create bounce. Otherwise, check pending_withdraw.
 
     bounced(msg: bounced<JettonTransfer>) {
         let qid: Int = msg.query_id;
@@ -400,43 +392,69 @@ contract LockupFactory {
         // Case A: bounce of a create-transfer.
         let child: Address? = self.pending_create.get(qid);
         if (child != null) {
+            let jm: Address? = self.create_jetton.get(qid);
+
+            // Verify bounce came from the expected jetton wallet.
+            if (jm != null) {
+                let jw: Address = self.own_wallets.get(jm!!)!!;
+                require(sender() == jw, "create bounce from wrong wallet");
+            }
+
             let creator: Address = self.create_creator.get(qid)!!;
             let amount: Int = self.create_amount.get(qid)!!;
             let ben: Address = self.create_beneficiary.get(qid)!!;
 
-            // Refund jettons to the creator. They are already on our
-            // jetton wallet (returned by the bounce), so we just send them out.
-            // The jetton master is known from the child address derivation? No —
-            // we need to know which jetton master to use for the transfer.
-            // We stored creator/amount/beneficiary, but not the master.
-            // To refund we need the master: recover it from child? Not possible.
-            // Solution: use pending_jetton-style tracking. See create_jetton below.
-            //
-            // For now, emit the failure event and leave jettons on the factory
-            // wallet. See Known Limitation L3.
+            // Refund jettons to creator. They are already on our wallet
+            // (returned by the bounce), so we just send them out.
+            if (jm != null) {
+                let jw: Address = self.own_wallets.get(jm!!)!!;
+                send(SendParameters{
+                    to: jw,
+                    value: REFUND_GAS,
+                    mode: SendPayGasSeparately,
+                    body: JettonTransfer{
+                        query_id: qid,
+                        amount: amount,
+                        destination: creator,
+                        response_destination: myAddress(),
+                        custom_payload: null,
+                        forward_ton_amount: 0,
+                        forward_payload: emptySlice()
+                    }.toCell()
+                });
+            }
+
+            emit(CreateBounced{
+                lock_id: qid,
+                amount: amount
+            }.toCell());
 
             emit(LockCreationFailed{
                 lock_id: qid,
                 creator: creator,
                 beneficiary: ben,
-                jetton: myAddress(), // placeholder — see create_jetton below
+                jetton: jm != null ? jm!! : myAddress(),
                 amount: amount
             }.toCell());
 
-            // Clean up pending create state.
+            // Cleanup.
             self.pending_create.set(qid, null);
             self.create_creator.set(qid, null);
             self.create_amount.set(qid, null);
             self.create_beneficiary.set(qid, null);
+            self.create_jetton.set(qid, null);
             return;
         }
 
         // Case B: bounce of a fee-withdrawal.
         let amt: Int? = self.pending_withdraw.get(qid);
-        let jm: Address? = self.pending_jetton.get(qid);
-        if (amt != null && jm != null) {
-            let cur: Int? = self.fees.get(jm!!);
-            self.fees.set(jm!!, (cur != null ? cur!! : 0) + amt!!);
+        let jm2: Address? = self.pending_jetton.get(qid);
+        if (amt != null && jm2 != null) {
+            let jw: Address = self.own_wallets.get(jm2!!)!!;
+            require(sender() == jw, "withdraw bounce from wrong wallet");
+
+            let cur: Int? = self.fees.get(jm2!!);
+            self.fees.set(jm2!!, (cur != null ? cur!! : 0) + amt!!);
 
             emit(WithdrawBounced{ query_id: qid, amount: amt!! }.toCell());
 
@@ -455,7 +473,6 @@ contract LockupFactory {
         require(msg.amount > 0, "zero amount");
         require(self.ton_fees >= msg.amount, "not enough ton fees");
 
-        // Same monotonic namespace as jetton withdrawals — prevents replay.
         require(self.used_qids.get(msg.query_id) == null, "query_id reused");
         self.used_qids.set(msg.query_id, true);
 
@@ -474,10 +491,6 @@ contract LockupFactory {
             destination: msg.destination
         }.toCell());
     }
-
-    // ═══════════════════════════════════════════════════════════════════════
-    // Plain TON top-ups (gas)
-    // ═══════════════════════════════════════════════════════════════════════
 
     receive() { }
 
@@ -509,4 +522,5 @@ contract LockupFactory {
     get fun pendingJettonOf(qid: Int): Address? { return self.pending_jetton.get(qid); }
 
     get fun pendingCreateOf(lockId: Int): Address? { return self.pending_create.get(lockId); }
+    get fun createJettonOf(lockId: Int): Address? { return self.create_jetton.get(lockId); }
 }
