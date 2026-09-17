@@ -15,6 +15,7 @@
     "verify:wallets": "tsx scripts/verify-jetton-wallets.ts"
   },
   "dependencies": {
+    "@orbs-network/ton-access": "^2.3.3",
     "@ton/core": "0.63.1",
     "@ton/ton": "16.3.0",
     "postgres": "3.4.9"
