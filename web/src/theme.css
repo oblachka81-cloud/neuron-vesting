@@ -163,3 +163,16 @@ footer a { color: #c3d4ea; font-size: 12px; text-shadow: 0 1px 6px rgba(0,0,0,.7
 @media (max-width: 480px) {
   .tabs { grid-template-columns: repeat(2, 1fr); }
 }
+
+/* ── music toggle (NEURON style) ── */
+.music-btn {
+  position: fixed; top: 12px; left: 12px; z-index: 50;
+  width: 44px; height: 44px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(8,12,22,.55);
+  border: 1px solid rgba(235,232,224,.5);
+  color: #f5e3b0; font-size: 20px; cursor: pointer;
+  box-shadow: 0 0 12px rgba(202,166,78,.25);
+  backdrop-filter: blur(4px);
+}
+.music-btn:active { box-shadow: 0 0 18px rgba(202,166,78,.5); }
