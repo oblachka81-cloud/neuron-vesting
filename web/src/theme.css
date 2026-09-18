@@ -1,0 +1,160 @@
+/* ═══ NEURON ECOSYSTEM skin for NEURON Vesting ═══ */
+
+body {
+  margin: 0;
+  font-family: 'Manrope', system-ui, sans-serif;
+  color: #e8f1ff;
+  background: #060a14;
+  min-height: 100vh;
+}
+
+/* ── video background ── */
+.bg-video {
+  position: fixed; inset: 0;
+  width: 100%; height: 100%;
+  object-fit: cover;
+  z-index: -2;
+}
+.bg-overlay {
+  position: fixed; inset: 0; z-index: -1;
+  background:
+    radial-gradient(1200px 500px at 50% -10%, rgba(89,240,216,.10), transparent 60%),
+    linear-gradient(180deg, rgba(4,8,20,.45), rgba(4,8,20,.82));
+}
+
+/* ── header ── */
+header { text-align: center; padding: 28px 16px 8px; }
+header h1 {
+  font-family: 'Marcellus', serif;
+  letter-spacing: .14em;
+  font-size: 26px;
+  margin: 0 0 6px;
+  background: linear-gradient(180deg, #fff6d8, #caa64e 55%, #8a6a2a);
+  -webkit-background-clip: text; background-clip: text;
+  color: transparent;
+  text-shadow: 0 0 22px rgba(202,166,78,.25);
+}
+.subtitle {
+  margin: 0 0 14px;
+  font-size: 12px; letter-spacing: .22em; text-transform: uppercase;
+  color: #9fb4d8;
+}
+.pills { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin-bottom: 14px; }
+.pill {
+  font-size: 11px; letter-spacing: .08em;
+  padding: 5px 12px; border-radius: 999px;
+  border: 1px solid rgba(89,240,216,.45);
+  background: rgba(10,20,32,.6);
+  color: #baffe f0;
+  color: #baffef;
+  box-shadow: 0 0 12px rgba(89,240,216,.18) inset;
+}
+#ton-connect { display: flex; justify-content: center; }
+
+/* ── tabs-pills ── */
+.tabs {
+  display: grid; grid-template-columns: repeat(4, 1fr);
+  gap: 8px; padding: 0 14px; margin: 10px 0 18px;
+  border-bottom: none;
+}
+.tabs button {
+  font-family: 'Marcellus', serif;
+  font-size: 14px; letter-spacing: .06em;
+  padding: 10px 6px; cursor: pointer; border-radius: 10px;
+  color: #cfd9ea;
+  background: linear-gradient(180deg, rgba(24,32,48,.85), rgba(8,12,22,.9));
+  border: 1px solid rgba(140,220,255,.22);
+}
+.tabs button.active {
+  color: #eafffa;
+  border-color: #59f0d8;
+  box-shadow: 0 0 16px rgba(89,240,216,.45), inset 0 0 10px rgba(89,240,216,.15);
+}
+
+/* ── glass panels ── */
+main { padding: 0 14px 30px; max-width: 720px; margin: 0 auto; }
+.card {
+  background: rgba(10,14,28,.72);
+  border: 1px solid rgba(120,200,255,.30);
+  border-radius: 14px;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  box-shadow: 0 0 24px rgba(80,160,255,.10), inset 0 0 18px rgba(80,160,255,.05);
+  padding: 16px; margin-bottom: 14px;
+}
+.card h2 {
+  font-family: 'Marcellus', serif;
+  letter-spacing: .1em; font-size: 16px;
+  color: #dff3ff; margin: 0 0 10px;
+  text-transform: uppercase;
+}
+.card code {
+  background: rgba(0,0,0,.45);
+  border: 1px solid rgba(140,220,255,.18);
+  padding: 3px 8px; border-radius: 6px;
+  font-size: 12px; word-break: break-all;
+}
+.hint, .hint a { color: #8fb3d9; font-size: 12px; }
+
+/* ── forms ── */
+label { display: block; margin-bottom: 12px; font-size: 13px; color: #bcd0e8; }
+input, textarea {
+  width: 100%; box-sizing: border-box;
+  padding: 10px 12px; margin-top: 5px;
+  background: rgba(5,10,20,.7);
+  color: #fff; font-size: 15px;
+  border: 1px solid rgba(140,220,255,.25);
+  border-radius: 8px;
+}
+input:focus, textarea:focus {
+  outline: none;
+  border-color: #59f0d8;
+  box-shadow: 0 0 10px rgba(89,240,216,.35);
+}
+
+/* ── gold buttons ── */
+button[type="submit"], #submit-btn, .tabs ~ * button[type="submit"] {
+  width: 100%;
+  font-family: 'Marcellus', serif;
+  font-size: 16px; letter-spacing: .08em;
+  padding: 12px; border-radius: 10px; cursor: pointer;
+  color: #f5e3b0;
+  background: linear-gradient(180deg, #3a3325, #151209 60%, #000);
+  border: 1px solid #caa64e;
+  text-shadow: 0 0 8px rgba(255,220,140,.45);
+  box-shadow: 0 0 14px rgba(202,166,78,.25);
+}
+button[type="submit"]:hover, #submit-btn:hover {
+  box-shadow: 0 0 22px rgba(202,166,78,.5);
+}
+button[type="submit"]:disabled {
+  opacity: .55; box-shadow: none; cursor: not-allowed;
+}
+
+/* ── lock cards ── */
+.lock-card {
+  background: rgba(8,14,26,.78);
+  border: 1px solid rgba(120,200,255,.28);
+  border-left: 3px solid #59f0d8;
+  border-radius: 10px;
+  padding: 12px; margin-bottom: 10px;
+}
+.lock-head code { background: rgba(0,0,0,.45); }
+.lock-status { color: #bcd0e8; }
+.lock-foot, .lock-foot a { color: #8fb3d9; font-size: 12px; }
+.btn-claim {
+  background: linear-gradient(180deg, #3a3325, #151209);
+  border: 1px solid #caa64e; color: #f5e3b0;
+  border-radius: 8px; padding: 5px 14px; cursor: pointer;
+  text-shadow: 0 0 6px rgba(255,220,140,.4);
+}
+.timer { color: #ffd43b; }
+
+/* ── status / footer ── */
+.status { font-size: 13px; color: #baffef; min-height: 18px; }
+footer { text-align: center; padding: 18px 0 26px; }
+footer a { color: #8fb3d9; font-size: 12px; }
+
+@media (max-width: 480px) {
+  .tabs { grid-template-columns: repeat(2, 1fr); }
+}
