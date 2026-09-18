@@ -1,14 +1,14 @@
-/* ═══ NEURON ECOSYSTEM skin for NEURON Vesting ═══ */
+/* ═══ NEURON ECOSYSTEM skin for NEURON Vesting (v2: clear glass + platinum) ═══ */
 
 body {
   margin: 0;
   font-family: 'Manrope', system-ui, sans-serif;
-  color: #e8f1ff;
+  color: #eef4ff;
   background: #060a14;
   min-height: 100vh;
 }
 
-/* ── video background ── */
+/* ── video background: city fully visible, no blur ── */
 .bg-video {
   position: fixed; inset: 0;
   width: 100%; height: 100%;
@@ -17,10 +17,12 @@ body {
 }
 .bg-overlay {
   position: fixed; inset: 0; z-index: -1;
-  background:
-    radial-gradient(1200px 500px at 50% -10%, rgba(89,240,216,.10), transparent 60%),
-    linear-gradient(180deg, rgba(4,8,20,.45), rgba(4,8,20,.82));
+  background: linear-gradient(180deg, rgba(4,8,20,.10), rgba(4,8,20,.38));
 }
+
+/* ── tab panels: instant CSS switch ── */
+[data-panel] { display: none; }
+[data-panel].active { display: block; }
 
 /* ── header ── */
 header { text-align: center; padding: 28px 16px 8px; }
@@ -37,17 +39,17 @@ header h1 {
 .subtitle {
   margin: 0 0 14px;
   font-size: 12px; letter-spacing: .22em; text-transform: uppercase;
-  color: #9fb4d8;
+  color: #cfd9ea;
+  text-shadow: 0 1px 8px rgba(0,0,0,.8);
 }
 .pills { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin-bottom: 14px; }
 .pill {
   font-size: 11px; letter-spacing: .08em;
   padding: 5px 12px; border-radius: 999px;
   border: 1px solid rgba(89,240,216,.45);
-  background: rgba(10,20,32,.6);
-  color: #baffe f0;
+  background: rgba(6,10,20,.45);
   color: #baffef;
-  box-shadow: 0 0 12px rgba(89,240,216,.18) inset;
+  text-shadow: 0 1px 6px rgba(0,0,0,.7);
 }
 #ton-connect { display: flex; justify-content: center; }
 
@@ -61,9 +63,10 @@ header h1 {
   font-family: 'Marcellus', serif;
   font-size: 14px; letter-spacing: .06em;
   padding: 10px 6px; cursor: pointer; border-radius: 10px;
-  color: #cfd9ea;
-  background: linear-gradient(180deg, rgba(24,32,48,.85), rgba(8,12,22,.9));
-  border: 1px solid rgba(140,220,255,.22);
+  color: #e6ecf7;
+  background: rgba(8,12,22,.45);
+  border: 1px solid rgba(235,232,224,.40);
+  text-shadow: 0 1px 6px rgba(0,0,0,.75);
 }
 .tabs button.active {
   color: #eafffa;
@@ -71,40 +74,42 @@ header h1 {
   box-shadow: 0 0 16px rgba(89,240,216,.45), inset 0 0 10px rgba(89,240,216,.15);
 }
 
-/* ── glass panels ── */
+/* ── clear-glass panels, thin platinum frames ── */
 main { padding: 0 14px 30px; max-width: 720px; margin: 0 auto; }
 .card {
-  background: rgba(10,14,28,.72);
-  border: 1px solid rgba(120,200,255,.30);
+  background: rgba(8,12,22,.20);
+  border: 1px solid rgba(235,232,224,.50);
   border-radius: 14px;
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
-  box-shadow: 0 0 24px rgba(80,160,255,.10), inset 0 0 18px rgba(80,160,255,.05);
+  box-shadow: 0 0 18px rgba(240,234,210,.10), inset 0 0 14px rgba(240,234,210,.05);
   padding: 16px; margin-bottom: 14px;
+  text-shadow: 0 1px 8px rgba(0,0,0,.7);
 }
 .card h2 {
   font-family: 'Marcellus', serif;
   letter-spacing: .1em; font-size: 16px;
-  color: #dff3ff; margin: 0 0 10px;
+  color: #f2f6ff; margin: 0 0 10px;
   text-transform: uppercase;
 }
 .card code {
-  background: rgba(0,0,0,.45);
-  border: 1px solid rgba(140,220,255,.18);
+  background: rgba(0,0,0,.55);
+  border: 1px solid rgba(235,232,224,.30);
   padding: 3px 8px; border-radius: 6px;
   font-size: 12px; word-break: break-all;
+  text-shadow: none;
 }
-.hint, .hint a { color: #8fb3d9; font-size: 12px; }
+.hint, .hint a { color: #c3d4ea; font-size: 12px; }
+.card ol, .card li { text-shadow: 0 1px 8px rgba(0,0,0,.75); }
 
-/* ── forms ── */
-label { display: block; margin-bottom: 12px; font-size: 13px; color: #bcd0e8; }
+/* ── forms: dark fields so typing stays readable ── */
+label { display: block; margin-bottom: 12px; font-size: 13px; color: #dce6f5; }
 input, textarea {
   width: 100%; box-sizing: border-box;
   padding: 10px 12px; margin-top: 5px;
-  background: rgba(5,10,20,.7);
+  background: rgba(2,4,10,.62);
   color: #fff; font-size: 15px;
-  border: 1px solid rgba(140,220,255,.25);
+  border: 1px solid rgba(235,232,224,.45);
   border-radius: 8px;
+  text-shadow: none;
 }
 input:focus, textarea:focus {
   outline: none;
@@ -113,7 +118,7 @@ input:focus, textarea:focus {
 }
 
 /* ── gold buttons ── */
-button[type="submit"], #submit-btn, .tabs ~ * button[type="submit"] {
+button[type="submit"], #submit-btn {
   width: 100%;
   font-family: 'Marcellus', serif;
   font-size: 16px; letter-spacing: .08em;
@@ -131,17 +136,17 @@ button[type="submit"]:disabled {
   opacity: .55; box-shadow: none; cursor: not-allowed;
 }
 
-/* ── lock cards ── */
+/* ── lock cards: platinum frame, clear glass ── */
 .lock-card {
-  background: rgba(8,14,26,.78);
-  border: 1px solid rgba(120,200,255,.28);
-  border-left: 3px solid #59f0d8;
+  background: rgba(8,12,22,.30);
+  border: 1px solid rgba(235,232,224,.50);
   border-radius: 10px;
   padding: 12px; margin-bottom: 10px;
+  text-shadow: 0 1px 8px rgba(0,0,0,.7);
 }
-.lock-head code { background: rgba(0,0,0,.45); }
-.lock-status { color: #bcd0e8; }
-.lock-foot, .lock-foot a { color: #8fb3d9; font-size: 12px; }
+.lock-head code { background: rgba(0,0,0,.55); }
+.lock-status { color: #dce6f5; }
+.lock-foot, .lock-foot a { color: #c3d4ea; font-size: 12px; }
 .btn-claim {
   background: linear-gradient(180deg, #3a3325, #151209);
   border: 1px solid #caa64e; color: #f5e3b0;
@@ -151,9 +156,9 @@ button[type="submit"]:disabled {
 .timer { color: #ffd43b; }
 
 /* ── status / footer ── */
-.status { font-size: 13px; color: #baffef; min-height: 18px; }
+.status { font-size: 13px; color: #baffef; min-height: 18px; text-shadow: 0 1px 6px rgba(0,0,0,.7); }
 footer { text-align: center; padding: 18px 0 26px; }
-footer a { color: #8fb3d9; font-size: 12px; }
+footer a { color: #c3d4ea; font-size: 12px; text-shadow: 0 1px 6px rgba(0,0,0,.7); }
 
 @media (max-width: 480px) {
   .tabs { grid-template-columns: repeat(2, 1fr); }
