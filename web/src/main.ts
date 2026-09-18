@@ -1,3 +1,4 @@
+import './price'; 
 import './polyfills';
 import { TonConnectUI } from '@tonconnect/ui';
 import { MANIFEST_URL } from './config';
