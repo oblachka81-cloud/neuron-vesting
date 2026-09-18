@@ -15,6 +15,32 @@
       <source src="./media/bg-city.mp4" type="video/mp4" />
     </video>
     <div class="bg-overlay"></div>
+    <button id="music-btn" class="music-btn" aria-label="toggle music">🔇</button>
+    <audio id="bg-music" loop preload="auto" src="./media/bg-music.mp3"></audio>
+    <script>
+      (function () {
+        var btn = document.getElementById('music-btn');
+        var audio = document.getElementById('bg-music');
+        var enabled = false;
+        function render() { btn.textContent = enabled ? '🔊' : '🔇'; }
+        function apply() {
+          if (enabled) { audio.play().catch(function () {}); }
+          else { audio.pause(); }
+        }
+        btn.addEventListener('click', function () {
+          enabled = !enabled;
+          render();
+          apply();
+        });
+        // если звук включён, но автоплей заблокирован — стартуем с первого касания
+        function onFirstGesture() {
+          if (enabled) apply();
+          window.removeEventListener('pointerdown', onFirstGesture);
+        }
+        window.addEventListener('pointerdown', onFirstGesture);
+        render();
+      })();
+    </script>
 
     <script>
       function nvBanner(text, color) {
