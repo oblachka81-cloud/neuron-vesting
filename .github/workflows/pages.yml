@@ -36,7 +36,12 @@ jobs:
         run: npm run build
 
       - name: Generate icon
-        run: node -e "require('fs').writeFileSync('web/dist/icon.png', Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==','base64'))"
+        run: |
+          if [ -f web/public/media/icon-512.png ]; then
+            cp web/public/media/icon-512.png web/dist/icon.png
+          else
+            node -e "require('fs').writeFileSync('web/dist/icon.png', Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==','base64'))"
+          fi
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
