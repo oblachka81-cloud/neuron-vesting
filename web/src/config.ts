@@ -1,5 +1,5 @@
-export const NETWORK: 'testnet' | 'mainnet' = 'testnet';
-export const FACTORY_ADDRESS = 'kQAhTRlJwkdR2vYdXz-RowoEGum_ITUZZFj6gdKdSggfjnNh';
+export const NETWORK: 'testnet' | 'mainnet' = 'mainnet';
+export const FACTORY_ADDRESS = 'EQD2QuIZLeFDQDD0MqZYX-57YYzpUKPExBW0DDJu8Ab2h3rV';
 export const API_URL = 'https://neuronvesting.bothost.tech';
 export const MANIFEST_URL = 'https://oblachka81-cloud.github.io/neuron-vesting/tonconnect-manifest.json';
 export const IS_TEST = FACTORY_ADDRESS.startsWith('kQ') || FACTORY_ADDRESS.startsWith('0Q');
