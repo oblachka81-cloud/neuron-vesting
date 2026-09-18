@@ -160,8 +160,42 @@ button[type="submit"]:disabled {
 footer { text-align: center; padding: 18px 0 26px; }
 footer a { color: #c3d4ea; font-size: 12px; text-shadow: 0 1px 6px rgba(0,0,0,.7); }
 
-@media (max-width: 480px) {
-  .tabs { grid-template-columns: repeat(2, 1fr); }
+@media (max-width: 520px) {
+  /* header compact */
+  header { padding: 20px 12px 6px; }
+  header h1 { font-size: 20px; letter-spacing: .1em; }
+  .subtitle { font-size: 9.5px; letter-spacing: .12em; }
+  .pills { gap: 6px; margin-bottom: 10px; }
+  .pill { font-size: 9.5px; padding: 4px 9px; letter-spacing: .04em; }
+
+  /* music button smaller, не давит на лого */
+  .music-btn { width: 36px; height: 36px; font-size: 16px; top: 8px; left: 8px; }
+
+  /* tabs 2x2 compact */
+  .tabs { grid-template-columns: repeat(2, 1fr); gap: 6px; padding: 0 10px; margin: 8px 0 12px; }
+  .tabs button { font-size: 12px; padding: 9px 4px; letter-spacing: .04em; }
+
+  /* panels */
+  main { padding: 0 10px 24px; }
+  .card { padding: 12px; margin-bottom: 10px; }
+  .card h2 { font-size: 14px; }
+
+  /* jetton card: чип адреса + цена + explorer переносятся аккуратно */
+  .lock-card { padding: 10px; }
+  #whitelist-list code,
+  #whitelist-list .price-tag,
+  #whitelist-list a {
+    display: inline-block;
+    vertical-align: middle;
+    margin-top: 4px;
+  }
+  .card code { font-size: 10.5px; }
+  .price-tag { margin-left: 6px !important; font-size: 9.5px; padding: 4px 8px; }
+
+  /* forms */
+  label { font-size: 12px; }
+  input, textarea { font-size: 14px; padding: 9px 10px; }
+  button[type="submit"], #submit-btn { font-size: 14px; padding: 11px; }
 }
 
 /* ── music toggle (NEURON style) ── */
