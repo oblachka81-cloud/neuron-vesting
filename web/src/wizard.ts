@@ -44,11 +44,14 @@ export function mountWizard(tc: TonConnectUI) {
       setStatus('Looking up your jetton wallet...');
       const userJettonWallet = await getUserJettonWallet(jettonMaster, creator);
 
+      // Build CreateLock payload for factory.
       const createLockCell = beginCell()
-        .storeUint(0x1, 32).storeUint(queryId, 64)
-        .storeAddress(jettonMaster).storeAddress(beneficiary)
-        .storeUint(unlockAt, 64).endCell();
-      const forwardPayload = beginCell().storeBit(1).storeRef(createLockCell).endCell().asSlice();
+        .storeUint(0x1, 32)
+        .storeUint(queryId, 64)
+        .storeAddress(jettonMaster)
+        .storeAddress(beneficiary)
+        .storeUint(unlockAt, 64)
+        .endCell();
 
       const transferBody = beginCell()
         .storeUint(0xf8a7ea5, 32)
@@ -57,9 +60,9 @@ export function mountWizard(tc: TonConnectUI) {
         .storeAddress(Address.parse(FACTORY_ADDRESS))
         .storeAddress(creator)
         .storeBit(0)
-        .storeCoins(toNano('1.4'))     // covers 1 TON platform fee + factory gas
+        .storeCoins(toNano('1.4'))
         .storeBit(1)
-        .storeRef(forwardPayload.asCell())
+        .storeRef(createLockCell)   // ← НАПРЯМУЮ, без обёртки
         .endCell();
 
       await tc.sendTransaction({
