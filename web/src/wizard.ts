@@ -45,7 +45,7 @@ export function mountWizard(tc: TonConnectUI) {
       const userJettonWallet = await getUserJettonWallet(jettonMaster, creator);
 
       const createLockCell = beginCell()
-        .storeUint(queryId, 64)
+        .storeUint(0x1, 32).storeUint(queryId, 64)
         .storeAddress(jettonMaster).storeAddress(beneficiary)
         .storeUint(unlockAt, 64).endCell();
       const forwardPayload = beginCell().storeBit(1).storeRef(createLockCell).endCell().asSlice();
