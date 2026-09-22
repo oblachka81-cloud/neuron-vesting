@@ -8,19 +8,26 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+
       - name: Show toolchain versions
         run: node -v && npm -v
-      - name: Install deps + force latest tact compiler
-        run: |
-          npm install --no-audit --no-fund --ignore-scripts
-          npm install --no-audit --no-fund --ignore-scripts --no-save @tact-lang/compiler@latest
-          npx tact --version
+
+      - name: Install deps
+        run: npm ci --no-audit --no-fund
+
+      - run: npx tact --version
+
       - run: npm run build
+
       - name: Deploy factory to mainnet
         env:
           MAINNET_MNEMONIC: ${{ secrets.MAINNET_MNEMONIC }}
           TONCENTER_API_KEY: ${{ secrets.TONCENTER_API_KEY }}
+          PLATFORM_FEE_BPS: ${{ vars.PLATFORM_FEE_BPS }}
+          PLATFORM_FEE_TON_NANO: ${{ vars.PLATFORM_FEE_TON_NANO }}
+          DEPLOY_SALT: ${{ vars.DEPLOY_SALT }}
         run: npx tsx scripts/deploy-mainnet.ts
