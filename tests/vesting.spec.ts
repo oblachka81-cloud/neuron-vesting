@@ -66,7 +66,10 @@ describe('NEURON Vesting — full suite (v2.5.1 / v2.6.1)', () => {
         fakeJettonWallet = await blockchain.treasury('jettonWallet');
         attacker = await blockchain.treasury('attacker');
 
-        factory = blockchain.openContract(await LockupFactory.fromInit(treasury.address));
+        // Matches deploy defaults: salt=1, fee_bps=50 (0.5%), fee_ton=1 TON
+        factory = blockchain.openContract(
+        await LockupFactory.fromInit(treasury.address, 1n, 50n, 1000000000n),
+     );
         // fund the factory with some TON
         await factory.send(treasury.getSender(), { value: toNano('10') }, null);
 
