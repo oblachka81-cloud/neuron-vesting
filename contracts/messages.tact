@@ -1,8 +1,9 @@
 // ═══════════════════════════════════════════════════════════════════════════
-// NEURON Vesting — shared message types
-// ───────────────────────────────────────────────────────────────────────────
-// TEP-74 messages used by both LockupFactory and LockupWallet.
-// Imported by both to avoid duplicate declarations.
+// NEURON Vesting — shared TEP-74 message types
+// ═══════════════════════════════════════════════════════════════════════════
+// Imported by both LockupFactory and LockupWallet.
+// Tact automatically strips Either Cell Slice for `Slice as remaining`,
+// so downstream code receives the Cell's content directly in the slice.
 // ═══════════════════════════════════════════════════════════════════════════
 
 message(0x0f8a7ea5) JettonTransfer {
