@@ -1,4 +1,4 @@
-// Deploy LockupFactory v2 to MAINNET
+// Deploy LockupFactory v2.6.0 to MAINNET
 import * as ton from '@ton/ton';
 import { mnemonicToPrivateKey } from '@ton/crypto';
 import { Address, beginCell, toNano, storeMessage, internal, SendMode } from '@ton/core';
@@ -15,7 +15,6 @@ async function main() {
     const pk = await mnemonicToPrivateKey(mnemonic.split(/\s+/));
     const wallet = ton.WalletContractV5R1.create({ workchain: 0, publicKey: pk.publicKey });
 
-    // ── RPC selection with fallback + getSeqno health check ────────────
     const rpcCandidates: Array<{ name: string; make: () => Promise<ton.TonClient> }> = [
         {
             name: 'Toncenter+key',
@@ -52,18 +51,17 @@ async function main() {
         }
     }
 
-    if (!client || !walletContract || seqno === null) {
-        throw new Error('All RPC endpoints failed getSeqno');
-    }
+    if (!client || !walletContract || seqno === null) throw new Error('All RPC endpoints failed');
+    const c = client;
+    const wc = walletContract;
 
-    const balance = await client.getBalance(wallet.address);
+    const balance = await c.getBalance(wallet.address);
     console.log('Deployer:', wallet.address.toString(), 'balance:', balance.toString());
     if (balance < toNano('0.3')) throw new Error('Deployer balance too low');
 
-    // ── Self-deploy deployer wallet if uninitialized ────────────────────
-    const dState = await client.getContractState(wallet.address);
+    const dState = await c.getContractState(wallet.address);
     if (dState.state !== 'active') {
-        console.log(`Deployer wallet state=${dState.state} - self-deploying with StateInit...`);
+        console.log(`Deployer wallet state=${dState.state} - self-deploying...`);
         const body = await wallet.createTransfer({
             seqno: 0,
             secretKey: pk.secretKey,
@@ -75,27 +73,41 @@ async function main() {
             init: { code: wallet.init!.code, data: wallet.init!.data },
             body,
         })).endCell();
-        await client.sendFile(ext.toBoc());
+        await c.sendFile(ext.toBoc());
         for (let i = 0; i < 30; i++) {
             await new Promise((r) => setTimeout(r, 3000));
-            const st = await client.getContractState(wallet.address);
-            if (st.state === 'active') { console.log('Deployer wallet is now ACTIVE'); break; }
+            const st = await c.getContractState(wallet.address);
+            if (st.state === 'active') { console.log('Deployer wallet ACTIVE'); break; }
         }
     }
 
+    // ── Fee params from env (with defaults) ────────────────────────────
+    const FEE_BPS = Number(process.env.PLATFORM_FEE_BPS ?? '50');
+    const FEE_TON_NANO = BigInt(process.env.PLATFORM_FEE_TON_NANO ?? '1000000000');
+    const SALT = BigInt(process.env.DEPLOY_SALT ?? '1');
+
+    if (FEE_BPS < 0 || FEE_BPS > 1000) throw new Error('PLATFORM_FEE_BPS must be 0..1000');
+    if (FEE_TON_NANO < 0n) throw new Error('PLATFORM_FEE_TON_NANO must be >= 0');
+
+    console.log('');
+    console.log('Fee BPS  :', FEE_BPS, `(${FEE_BPS / 100}%)`);
+    console.log('Fee TON  :', FEE_TON_NANO.toString(), `nano (${Number(FEE_TON_NANO) / 1e9} TON)`);
+    console.log('Salt     :', SALT.toString());
+
     const treasury = Address.parse(TREASURY);
     const master = Address.parse(COGNIQ_MASTER);
-    const factory = client.open(await LockupFactory.fromInit(treasury));
+    const factory = c.open(
+        await LockupFactory.fromInit(treasury, SALT, BigInt(FEE_BPS), FEE_TON_NANO)
+    );
 
     console.log('TREASURY:', treasury.toString());
     console.log('FACTORY :', factory.address.toString());
     console.log('Explorer: https://tonviewer.com/' + factory.address.toString());
 
-    // ── Deploy factory if needed ───────────────────────────────────────
-    const initial = await client.getContractState(factory.address);
+    const initial = await c.getContractState(factory.address);
     if (initial.state !== 'active') {
         console.log('Deploying factory...');
-        await walletContract.sendTransfer({
+        await wc.sendTransfer({
             seqno: seqno!,
             secretKey: pk.secretKey,
             messages: [internal({
@@ -105,38 +117,31 @@ async function main() {
                 body: beginCell().endCell(),
             })],
         });
-        console.log('Sent. Waiting up to 90s for factory to become active...');
+        console.log('Sent. Waiting up to 90s...');
         let active = false;
         for (let i = 0; i < 30; i++) {
             await new Promise((r) => setTimeout(r, 3000));
-            const st = await client.getContractState(factory.address);
-            if (st.state === 'active') {
-                console.log('FACTORY DEPLOYED ✅');
-                active = true;
-                break;
-            }
+            const st = await c.getContractState(factory.address);
+            if (st.state === 'active') { console.log('FACTORY DEPLOYED ✅'); active = true; break; }
         }
-        if (!active) {
-            console.log('⚠️ Factory still not active. Check explorer.');
-        }
+        if (!active) console.log('⚠️ Factory not active yet. Check explorer.');
     } else {
-        console.log('Already deployed');
+        console.log('Factory already active at this address (same salt+treasury+fees).');
     }
 
     console.log('nextLockId:', (await factory.getNextLockId()).toString());
 
-    // ── Derive factory jetton wallet + build whitelist body ────────────
-    const res = await client.runMethod(master, 'get_wallet_address', [
+    const res = await c.runMethod(master, 'get_wallet_address', [
         { type: 'slice', cell: beginCell().storeAddress(factory.address).endCell() },
     ]);
     const factoryJettonWallet = res.stack.readCell().beginParse().loadAddress()!;
     console.log('FACTORY COGNIQ JETTON WALLET:', factoryJettonWallet.toString());
 
     const body = beginCell()
-        .storeUint(0x21, 32)          // op: SetJettonWallet
-        .storeUint(1, 64)             // query_id
-        .storeAddress(master)         // jetton_master
-        .storeAddress(factoryJettonWallet) // jetton_wallet
+        .storeUint(0x21, 32)
+        .storeUint(1, 64)
+        .storeAddress(master)
+        .storeAddress(factoryJettonWallet)
         .endCell();
 
     console.log('');
