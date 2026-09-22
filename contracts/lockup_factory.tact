@@ -408,33 +408,33 @@ contract LockupFactory {
                 let charged_jetton: Int = self.create_fee_jetton.get(lock_id)!!;
 
                 if (jm != null) {
-                    let jw: Address = self.own_wallets.get(jm!!)!!;
-                    let total_refund: Int = amount + charged_jetton;
-                    send(SendParameters{
-                        to: jw,
-                        value: REFUND_GAS,
-                        mode: SendPayGasSeparately,
-                        body: JettonTransfer{
-                            query_id: lock_id,
-                            amount: total_refund,
-                            destination: creator,
-                            response_destination: myAddress(),
-                            custom_payload: null,
-                            forward_ton_amount: 0,
-                            forward_payload: emptySlice()
-                        }.toCell()
-                    });
+    let jw: Address = self.own_wallets.get(jm!!)!!;
+    let total_refund: Int = amount + charged_jetton;
+    send(SendParameters{
+        to: jw,
+        value: REFUND_GAS,
+        mode: SendPayGasSeparately,
+        body: JettonTransfer{
+            query_id: lock_id,
+            amount: total_refund,
+            destination: creator,
+            response_destination: myAddress(),
+            custom_payload: null,
+            forward_ton_amount: 0,
+            forward_payload: emptySlice()
+        }.toCell()
+    });
 
-                     // Roll back charged jetton fee without underflow.
-                    // fees[jm] should never be < charged_jetton; if it is,
-                   // saturate at 0 instead of throwing — a bounce handler
-                  // must not revert, or the refund would be stuck forever.
-                let curJettonFee: Int = self.fees.get(jm!!) ?? 0;
-                let newJettonFee: Int = curJettonFee > charged_jetton
-                ? curJettonFee - charged_jetton
-                : 0;
-                self.fees.set(jm!!, newJettonFee);
-                }
+    // Roll back charged jetton fee without underflow.
+    // fees[jm] should never be < charged_jetton; if it is,
+    // saturate at 0 instead of throwing — a bounce handler
+    // must not revert, or the refund would be stuck forever.
+    let curJettonFee: Int = self.fees.get(jm!!) ?? 0;
+    let newJettonFee: Int = curJettonFee > charged_jetton
+        ? curJettonFee - charged_jetton
+        : 0;
+    self.fees.set(jm!!, newJettonFee);
+}
 
                 if (self.ton_fees >= charged_ton) {
                     self.ton_fees = self.ton_fees - charged_ton;
