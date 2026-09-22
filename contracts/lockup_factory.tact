@@ -429,7 +429,8 @@ contract LockupFactory {
     // fees[jm] should never be < charged_jetton; if it is,
     // saturate at 0 instead of throwing — a bounce handler
     // must not revert, or the refund would be stuck forever.
-    let curJettonFee: Int = self.fees.get(jm!!) ?? 0;
+    let curJettonFeeOpt: Int? = self.fees.get(jm!!);
+    let curJettonFee: Int = curJettonFeeOpt != null ? curJettonFeeOpt!! : 0;
     let newJettonFee: Int = curJettonFee > charged_jetton
         ? curJettonFee - charged_jetton
         : 0;
