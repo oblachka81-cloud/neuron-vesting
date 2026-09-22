@@ -1,44 +1,38 @@
 // ═══════════════════════════════════════════════════════════════════════════
-// NEURON Vesting — LockupFactory v2.5.1 (Final)
-// ───────────────────────────────────────────────────────────────────────────
-// Singleton factory. Receives jetton transfers with CreateLock payload,
-// deploys per-lock LockupWallet instances, forwards locked jettons.
-// Also accumulates and lets treasury withdraw jetton & TON platform fees.
+// NEURON Vesting — LockupFactory v2.6.0 (Final)
+// ═══════════════════════════════════════════════════════════════════════════
 //
-// Treasury-provided jetton wallet addresses (no deterministic computation).
+// Treasury-controlled mutable platform fees (fee_bps, fee_ton).
+// Correct parsing of TEP-74 forward_payload (Either handled by Tact).
+// Bounce-safe refunds for both TON-fee and jetton-fee.
+// Monotonic query_id registry with separate space for create-transfers.
 //
 // Invariants:
 //   F1.  next_id strictly increases, never reused
 //   F2.  own_wallets[m] set  <=>  treasury approved master m
 //   F3.  wallet_to_master[w] = m  <=>  own_wallets[m] = w  (bijection)
-//   F4.  fees[m] = sum of all 0.5% cuts for master m, minus withdrawals
+//   F4.  fees[m] = sum of cuts for master m minus withdrawals (modulo rollbacks)
 //   F5.  pending_withdraw[qid] and pending_jetton[qid] set/cleared together
-//   F6.  used_qids monotonic: once true, never false
-//   F7.  pending_create[qid] set at create, cleared on success or bounce
-//   F8.  create_jetton[qid] tracks master for refund on create bounce
-//   F9.  ton_fees >= 0 at all times
+//   F6.  used_qids monotonic for treasury-initiated ops
+//   F7.  pending_create[id] and create_*[id] set together, cleared on bounce
+//   F8.  ton_fees tracks platform TON income
 //
-// Trust model:
-//   - treasury: trusted for whitelisting jettons and withdrawing fees.
-//     CANNOT steal locked tokens. DoS mitigation: off-chain verifier + multi-sig.
-//   - any user: can create a lock by sending jettons to the factory.
-//   - creator:  taken from JettonNotification.sender (original owner).
+// Query_id spaces:
+//   create-transfers: id | (1 << 63)   (high bit set)
+//   treasury ops:     msg.query_id     (high bit MUST be clear)
 //
-// Known limitations:
-//   L1. Lost fee-withdrawal bounce leaves pending_withdraw[qid] set forever.
-//       No funds lost; treasury simply uses a new query_id.
-//   L2. Overpay refund goes to msg.sender (original owner), not sender().
-//   L3. If a create-transfer bounces, factory refunds to creator and emits
-//       LockCreationFailed. The LockupWallet stays deployed but empty.
+// Known behaviour:
+//   LB1. LockCreated is emitted before the jetton transfer confirms.
+//        If it bounces, CreateBounced + LockCreationFailed follow.
+//        Frontends MUST treat a lock as canonical only after N blocks
+//        without LockCreationFailed for the same id.
 // ═══════════════════════════════════════════════════════════════════════════
 
 import "@stdlib/deploy";
 import "./messages";
 import "./lockup_wallet";
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Control messages
-// ═══════════════════════════════════════════════════════════════════════════
+// ─── Control messages ──────────────────────────────────────────────────────
 
 message(0x21) SetJettonWallet {
     query_id: Int as uint64;
@@ -59,9 +53,30 @@ message(0x22) WithdrawTonFees {
     destination: Address;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Events (factory range 0x100-0x11F)
-// ═══════════════════════════════════════════════════════════════════════════
+message(0x23) RescueTon {
+    query_id: Int as uint64;
+    amount: Int as coins;
+    destination: Address;
+}
+
+message(0x24) RescueJetton {
+    query_id: Int as uint64;
+    jetton_master: Address;
+    amount: Int as coins;
+    destination: Address;
+}
+
+message(0x25) SetFeeBps {
+    query_id: Int as uint64;
+    fee_bps: Int as uint16;
+}
+
+message(0x26) SetFeeTon {
+    query_id: Int as uint64;
+    fee_ton: Int as coins;
+}
+
+// ─── Events ─────────────────────────────────────────────────────────────────
 
 message(0x100) LockCreated {
     lock_id: Int as uint64;
@@ -118,25 +133,38 @@ message(0x112) CreateBounced {
     amount: Int as coins;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Constants
-// ═══════════════════════════════════════════════════════════════════════════
+message(0x113) FeeBpsChanged {
+    old_fee_bps: Int as uint16;
+    new_fee_bps: Int as uint16;
+}
 
-const PLATFORM_FEE_TON: Int = ton("1");
+message(0x114) FeeTonChanged {
+    old_fee_ton: Int as coins;
+    new_fee_ton: Int as coins;
+}
+
+// ─── Constants ──────────────────────────────────────────────────────────────
+
 const GAS_BUFFER_TON: Int = ton("0.25");
 const DEPLOY_GAS: Int = ton("0.15");
 const TRANSFER_GAS: Int = ton("0.15");
 const REFUND_GAS: Int = ton("0.08");
+const RESCUE_GAS: Int = ton("0.1");
 const MAX_LOCK_DURATION: Int = 315360000;   // 10 years
 const CREATE_LOCK_OP: Int = 0x1;
+const CREATE_QID_HIGH_BIT: Int = 1 << 63;
+const MAX_FEE_BPS: Int = 1000;               // 10%
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Contract
-// ═══════════════════════════════════════════════════════════════════════════
+// ─── Contract ───────────────────────────────────────────────────────────────
 
 contract LockupFactory {
     next_id: Int as uint64;
     treasury: Address;
+    salt: Int as uint64;
+
+    // mutable platform fees
+    fee_bps: Int as uint16;
+    fee_ton: Int as coins;
 
     own_wallets: map<Address, Address>;
     wallet_to_master: map<Address, Address>;
@@ -153,23 +181,26 @@ contract LockupFactory {
     create_amount: map<Int, Int>;
     create_beneficiary: map<Int, Address>;
     create_jetton: map<Int, Address>;
+    create_fee_ton: map<Int, Int>;
+    create_fee_jetton: map<Int, Int>;
 
-    init(treasury: Address) {
+    init(treasury: Address, salt: Int, fee_bps: Int, fee_ton: Int) {
         self.next_id = 1;
         self.treasury = treasury;
+        self.salt = salt;
+        self.fee_bps = fee_bps;
+        self.fee_ton = fee_ton;
         self.ton_fees = 0;
     }
 
-    // ═══════════════════════════════════════════════════════════════════════
-    // Treasury: whitelist a jetton master
-    // ═══════════════════════════════════════════════════════════════════════
+    // ── Treasury: whitelist jetton master ──────────────────────────────
 
     receive(msg: SetJettonWallet) {
         require(sender() == self.treasury, "not treasury");
         require(msg.query_id > 0, "query_id must be > 0");
 
         let cur: Address? = self.own_wallets.get(msg.jetton_master);
-        require(cur == null || cur!! == msg.jetton_wallet, "already set to different wallet");
+        require(cur == null || cur!! == msg.jetton_wallet, "already set");
 
         self.own_wallets.set(msg.jetton_master, msg.jetton_wallet);
         self.wallet_to_master.set(msg.jetton_wallet, msg.jetton_master);
@@ -180,9 +211,27 @@ contract LockupFactory {
         }.toCell());
     }
 
-    // ═══════════════════════════════════════════════════════════════════════
-    // User: create a lock via jetton transfer + forward payload
-    // ═══════════════════════════════════════════════════════════════════════
+    // ── Treasury: mutable fees ─────────────────────────────────────────
+
+    receive(msg: SetFeeBps) {
+        require(sender() == self.treasury, "not treasury");
+        require(msg.query_id > 0, "query_id must be > 0");
+        require(msg.fee_bps <= MAX_FEE_BPS, "max 10%");
+        let old: Int = self.fee_bps;
+        self.fee_bps = msg.fee_bps;
+        emit(FeeBpsChanged{ old_fee_bps: old, new_fee_bps: msg.fee_bps }.toCell());
+    }
+
+    receive(msg: SetFeeTon) {
+        require(sender() == self.treasury, "not treasury");
+        require(msg.query_id > 0, "query_id must be > 0");
+        require(msg.fee_ton >= 0, "negative fee");
+        let old: Int = self.fee_ton;
+        self.fee_ton = msg.fee_ton;
+        emit(FeeTonChanged{ old_fee_ton: old, new_fee_ton: msg.fee_ton }.toCell());
+    }
+
+    // ── User: create lock via jetton transfer + forward payload ────────
 
     receive(msg: JettonNotification) {
         let jm: Address? = self.wallet_to_master.get(sender());
@@ -192,12 +241,11 @@ contract LockupFactory {
         let factoryWallet: Address? = self.own_wallets.get(jetton_master);
         require(factoryWallet != null, "jetton not whitelisted");
 
-        require(context().value >= PLATFORM_FEE_TON + GAS_BUFFER_TON, "attach 1.25 TON");
+        require(context().value >= self.fee_ton + GAS_BUFFER_TON, "attach fee + buffer");
 
+        // Tact already stripped Either for `Slice as remaining`.
+        // The slice begins directly with CreateLock body.
         let sc: Slice = msg.forward_payload;
-        if (sc.loadBit()) {
-            sc = sc.loadRef().beginParse();
-        }
         require(sc.loadUint(32) == CREATE_LOCK_OP, "wrong op");
         let qid: Int = sc.loadUint(64);
         let jm_in_payload: Address = sc.loadAddress();
@@ -209,8 +257,8 @@ contract LockupFactory {
         require(unlock_at <= now() + MAX_LOCK_DURATION, "unlock too far");
         require(qid > 0, "query_id must be > 0");
 
-        let overpay: Int = context().value - PLATFORM_FEE_TON - GAS_BUFFER_TON;
-        self.ton_fees = self.ton_fees + PLATFORM_FEE_TON;
+        let overpay: Int = context().value - self.fee_ton - GAS_BUFFER_TON;
+        self.ton_fees = self.ton_fees + self.fee_ton;
 
         if (overpay > 0) {
             send(SendParameters{
@@ -222,7 +270,8 @@ contract LockupFactory {
             emit(OverpayRefunded{ creator: msg.sender, amount: overpay }.toCell());
         }
 
-        let fee: Int = (msg.amount * 50) / 10000;
+        let fee: Int = (msg.amount * self.fee_bps) / 10000;
+        require(fee >= 0, "fee < 0");
         let lock_amount: Int = msg.amount - fee;
         require(lock_amount > 0, "too small");
 
@@ -234,6 +283,9 @@ contract LockupFactory {
 
         let id: Int = self.next_id;
         self.next_id = id + 1;
+
+        self.create_fee_ton.set(id, self.fee_ton);
+        self.create_fee_jetton.set(id, fee);
 
         let childInit: StateInit = initOf LockupWallet(
             id,
@@ -267,7 +319,7 @@ contract LockupFactory {
             value: TRANSFER_GAS,
             mode: SendPayGasSeparately,
             body: JettonTransfer{
-                query_id: id,
+                query_id: id | CREATE_QID_HIGH_BIT,
                 amount: lock_amount,
                 destination: childAddr,
                 response_destination: myAddress(),
@@ -277,6 +329,7 @@ contract LockupFactory {
             }.toCell()
         });
 
+        // NOTE: LockCreated = attempt, not confirmation. See LB1.
         emit(LockCreated{
             lock_id: id,
             creator: creator,
@@ -286,16 +339,15 @@ contract LockupFactory {
             unlock_at: unlock_at
         }.toCell());
 
-        emit(TonFeeCollected{ lock_id: id, amount: PLATFORM_FEE_TON }.toCell());
+        emit(TonFeeCollected{ lock_id: id, amount: self.fee_ton }.toCell());
     }
 
-    // ═══════════════════════════════════════════════════════════════════════
-    // Treasury: withdraw accumulated jetton fees
-    // ═══════════════════════════════════════════════════════════════════════
+    // ── Treasury: withdraw jetton fees ─────────────────────────────────
 
     receive(msg: WithdrawFees) {
         require(sender() == self.treasury, "not treasury");
         require(msg.query_id > 0, "query_id must be > 0");
+        require(msg.query_id < CREATE_QID_HIGH_BIT, "qid reserved space");
         require(msg.amount > 0, "zero amount");
         require(self.used_qids.get(msg.query_id) == null, "query_id reused");
 
@@ -332,60 +384,81 @@ contract LockupFactory {
         }.toCell());
     }
 
-    // ═══════════════════════════════════════════════════════════════════════
-    // Bounce handler
-    // ═══════════════════════════════════════════════════════════════════════
+    // ── Bounce handler ─────────────────────────────────────────────────
 
     bounced(msg: bounced<JettonTransfer>) {
         let qid: Int = msg.query_id;
+        let isCreate: Bool = (qid & CREATE_QID_HIGH_BIT) != 0;
 
-        // Case A: create-transfer bounce
-        let child: Address? = self.pending_create.get(qid);
-        if (child != null) {
-            let jm: Address? = self.create_jetton.get(qid);
+        if (isCreate) {
+            let lock_id: Int = qid & (CREATE_QID_HIGH_BIT - 1);
+            let child: Address? = self.pending_create.get(lock_id);
+            if (child != null) {
+                let jm: Address? = self.create_jetton.get(lock_id);
 
-            if (jm != null) {
-                let jw: Address = self.own_wallets.get(jm!!)!!;
-                require(sender() == jw, "create bounce from wrong wallet");
+                if (jm != null) {
+                    let jw: Address = self.own_wallets.get(jm!!)!!;
+                    require(sender() == jw, "create bounce from wrong wallet");
+                }
+
+                let creator: Address = self.create_creator.get(lock_id)!!;
+                let amount: Int = self.create_amount.get(lock_id)!!;
+                let ben: Address = self.create_beneficiary.get(lock_id)!!;
+                let charged_ton: Int = self.create_fee_ton.get(lock_id)!!;
+                let charged_jetton: Int = self.create_fee_jetton.get(lock_id)!!;
+
+                if (jm != null) {
+                    let jw: Address = self.own_wallets.get(jm!!)!!;
+                    let total_refund: Int = amount + charged_jetton;
+                    send(SendParameters{
+                        to: jw,
+                        value: REFUND_GAS,
+                        mode: SendPayGasSeparately,
+                        body: JettonTransfer{
+                            query_id: lock_id,
+                            amount: total_refund,
+                            destination: creator,
+                            response_destination: myAddress(),
+                            custom_payload: null,
+                            forward_ton_amount: 0,
+                            forward_payload: emptySlice()
+                        }.toCell()
+                    });
+
+                    let curJettonFee: Int? = self.fees.get(jm!!);
+                    if (curJettonFee != null && curJettonFee!! >= charged_jetton) {
+                        self.fees.set(jm!!, curJettonFee!! - charged_jetton);
+                    }
+                }
+
+                if (self.ton_fees >= charged_ton) {
+                    self.ton_fees = self.ton_fees - charged_ton;
+                    send(SendParameters{
+                        to: creator,
+                        value: charged_ton,
+                        mode: SendPayGasSeparately,
+                        body: emptyCell()
+                    });
+                }
+
+                emit(CreateBounced{ lock_id: lock_id, amount: amount }.toCell());
+
+                emit(LockCreationFailed{
+                    lock_id: lock_id,
+                    creator: creator,
+                    beneficiary: ben,
+                    jetton: jm != null ? jm!! : myAddress(),
+                    amount: amount
+                }.toCell());
+
+                self.pending_create.set(lock_id, null);
+                self.create_creator.set(lock_id, null);
+                self.create_amount.set(lock_id, null);
+                self.create_beneficiary.set(lock_id, null);
+                self.create_jetton.set(lock_id, null);
+                self.create_fee_ton.set(lock_id, null);
+                self.create_fee_jetton.set(lock_id, null);
             }
-
-            let creator: Address = self.create_creator.get(qid)!!;
-            let amount: Int = self.create_amount.get(qid)!!;
-            let ben: Address = self.create_beneficiary.get(qid)!!;
-
-            if (jm != null) {
-                let jw: Address = self.own_wallets.get(jm!!)!!;
-                send(SendParameters{
-                    to: jw,
-                    value: REFUND_GAS,
-                    mode: SendPayGasSeparately,
-                    body: JettonTransfer{
-                        query_id: qid,
-                        amount: amount,
-                        destination: creator,
-                        response_destination: myAddress(),
-                        custom_payload: null,
-                        forward_ton_amount: 0,
-                        forward_payload: emptySlice()
-                    }.toCell()
-                });
-            }
-
-            emit(CreateBounced{ lock_id: qid, amount: amount }.toCell());
-
-            emit(LockCreationFailed{
-                lock_id: qid,
-                creator: creator,
-                beneficiary: ben,
-                jetton: jm != null ? jm!! : myAddress(),
-                amount: amount
-            }.toCell());
-
-            self.pending_create.set(qid, null);
-            self.create_creator.set(qid, null);
-            self.create_amount.set(qid, null);
-            self.create_beneficiary.set(qid, null);
-            self.create_jetton.set(qid, null);
             return;
         }
 
@@ -406,13 +479,12 @@ contract LockupFactory {
         }
     }
 
-    // ═══════════════════════════════════════════════════════════════════════
-    // Treasury: withdraw accumulated TON fees
-    // ═══════════════════════════════════════════════════════════════════════
+    // ── Treasury: withdraw TON fees ────────────────────────────────────
 
     receive(msg: WithdrawTonFees) {
         require(sender() == self.treasury, "not treasury");
         require(msg.query_id > 0, "query_id must be > 0");
+        require(msg.query_id < CREATE_QID_HIGH_BIT, "qid reserved space");
         require(msg.amount > 0, "zero amount");
         require(self.ton_fees >= msg.amount, "not enough ton fees");
         require(self.used_qids.get(msg.query_id) == null, "query_id reused");
@@ -434,14 +506,67 @@ contract LockupFactory {
         }.toCell());
     }
 
+    // ── Treasury: rescue TON ───────────────────────────────────────────
+
+    receive(msg: RescueTon) {
+        require(sender() == self.treasury, "not treasury");
+        require(msg.query_id > 0, "query_id must be > 0");
+        require(msg.query_id < CREATE_QID_HIGH_BIT, "qid reserved space");
+        require(msg.amount > 0, "zero amount");
+        require(self.used_qids.get(msg.query_id) == null, "query_id reused");
+
+        let reserve: Int = ton("0.05");
+        require(myBalance() >= msg.amount + reserve, "not enough ton");
+
+        self.used_qids.set(msg.query_id, true);
+
+        send(SendParameters{
+            to: msg.destination,
+            value: msg.amount,
+            mode: SendPayGasSeparately,
+            body: emptyCell()
+        });
+    }
+
+    // ── Treasury: rescue stuck jettons ─────────────────────────────────
+
+    receive(msg: RescueJetton) {
+        require(sender() == self.treasury, "not treasury");
+        require(msg.query_id > 0, "query_id must be > 0");
+        require(msg.query_id < CREATE_QID_HIGH_BIT, "qid reserved space");
+        require(msg.amount > 0, "zero amount");
+        require(self.used_qids.get(msg.query_id) == null, "query_id reused");
+
+        let jw: Address? = self.own_wallets.get(msg.jetton_master);
+        require(jw != null, "jetton not whitelisted");
+
+        self.used_qids.set(msg.query_id, true);
+
+        send(SendParameters{
+            to: jw!!,
+            value: RESCUE_GAS,
+            mode: SendPayGasSeparately,
+            body: JettonTransfer{
+                query_id: msg.query_id,
+                amount: msg.amount,
+                destination: msg.destination,
+                response_destination: myAddress(),
+                custom_payload: null,
+                forward_ton_amount: 0,
+                forward_payload: emptySlice()
+            }.toCell()
+        });
+    }
+
     receive() { }
 
-    // ═══════════════════════════════════════════════════════════════════════
-    // Getters
-    // ═══════════════════════════════════════════════════════════════════════
+    // ── Getters ────────────────────────────────────────────────────────
 
     get fun nextLockId(): Int { return self.next_id; }
     get fun treasuryAddress(): Address { return self.treasury; }
+    get fun saltGet(): Int { return self.salt; }
+    get fun feeBps(): Int { return self.fee_bps; }
+    get fun feeTon(): Int { return self.fee_ton; }
 
     get fun feeOf(jetton: Address): Int {
         let f: Int? = self.fees.get(jetton);
