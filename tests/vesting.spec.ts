@@ -252,31 +252,26 @@ describe('NEURON Vesting — full suite (v2.5.1 / v2.6.1)', () => {
             expect(await factory.getTonFees()).toEqual(FEE_TON);
         });
 
-        it('8. inline payload (too short, bit=0) -> rejected, no crash', async () => {
-    const unlockAt = BigInt(blockchain.now! + 3600);
-
-    // Build a SHORT inline payload (bit=0) that fits in JettonNotification.
-    // This is NOT a valid CreateLock payload (missing fields) — the contract
-    // must reject it cleanly, not throw an unexpected exit code.
-    const tooShort = beginCell()
-        .storeBit(0)          // inline marker
-        .storeUint(0x1, 32)   // wrong op — should fail on op check
-        .storeUint(1n, 64)    // qid
-        .endCell()
-        .asSlice();
-
-    const res = await factory.send(
-        fakeJettonWallet.getSender(),
-        { value: ATTACH_TON },
-        makeJettonNotification(1n, JETTON_AMOUNT, user.address, tooShort),
-    );
-
-    expect(res.transactions).toHaveTransaction({
-        from: fakeJettonWallet.address,
-        to: factory.address,
-        success: false,
-    });
-});
+        it('8. inline payload too short -> guard refunds, no exit 9', async () => {
+            const tooShort = beginCell()
+                .storeBit(0)
+                .storeUint(0x1, 32)
+                .storeUint(1n, 64)
+                .endCell()
+                .asSlice();
+            const res = await factory.send(
+                fakeJettonWallet.getSender(),
+                { value: ATTACH_TON },
+                makeJettonNotification(1n, JETTON_AMOUNT, user.address, tooShort),
+            );
+            expect(res.transactions).toHaveTransaction({
+                from: fakeJettonWallet.address,
+                to: factory.address,
+                success: true,
+            });
+            expect(await factory.getTonFees()).toEqual(0n);
+            expect(await factory.getNextLockId()).toEqual(1n);
+        });
 
         it('9. unknown sender (not whitelisted) -> rejected', async () => {
             const unlockAt = BigInt(blockchain.now! + 3600);
@@ -1219,51 +1214,51 @@ describe('NEURON Vesting — full suite (v2.5.1 / v2.6.1)', () => {
     describe('Factory: v2.6 payload guard', () => {
         it('56. empty forward_payload -> refund instead of exit 9', async () => {
             const emptyPayload = beginCell().endCell().asSlice();
-
             const res = await factory.send(
                 fakeJettonWallet.getSender(),
                 { value: ATTACH_TON },
                 makeJettonNotification(999n, JETTON_AMOUNT, user.address, emptyPayload),
             );
-
-            // Фабрика НЕ упала с exit 9 — guard отработал, транзакция успешна
             expect(res.transactions).toHaveTransaction({
                 from: fakeJettonWallet.address,
                 to: factory.address,
                 success: true,
             });
-
-            // LockCreationFailed (0x111) эмитнут
+            // jetton refund goes through factory's jetton wallet
             expect(res.transactions).toHaveTransaction({
                 from: factory.address,
-                op: 0x111,
+                to: fakeJettonWallet.address,
+                op: 0x0f8a7ea5,
             });
-
-            // ton_fees НЕ увеличился (лок не создан)
+            // TON back to creator (msg.sender field = user)
+            expect(res.transactions).toHaveTransaction({
+                from: factory.address,
+                to: user.address,
+                success: true,
+            });
             expect(await factory.getTonFees()).toEqual(0n);
-
-            // nextLockId НЕ увеличился
             expect(await factory.getNextLockId()).toEqual(1n);
         });
 
-        it('57. wrong opcode in payload -> refund instead of exit 9', async () => {
+        it('57. wrong opcode in full-size payload -> refund instead of exit 9', async () => {
             const badPayload = beginCell()
                 .storeBit(1)
                 .storeRef(
                     beginCell()
-                        .storeUint(0xDEAD, 32) // неправильный op вместо 0x1
+                        .storeUint(0xDEAD, 32) // wrong op, full 694-bit body
                         .storeUint(1n, 64)
+                        .storeAddress(jettonMaster.address)
+                        .storeAddress(beneficiary.address)
+                        .storeUint(BigInt(blockchain.now! + 3600), 64)
                         .endCell(),
                 )
                 .endCell()
                 .asSlice();
-
             const res = await factory.send(
                 fakeJettonWallet.getSender(),
                 { value: ATTACH_TON },
                 makeJettonNotification(888n, JETTON_AMOUNT, user.address, badPayload),
             );
-
             expect(res.transactions).toHaveTransaction({
                 from: fakeJettonWallet.address,
                 to: factory.address,
