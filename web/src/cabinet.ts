@@ -1,6 +1,6 @@
-import { toNano } from '@ton/core';
+import { toNano, Address, beginCell } from '@ton/core';
 import type { TonConnectUI } from '@tonconnect/ui';
-import { API_URL, EXPLORER } from './config';
+import { API_URL, EXPLORER, FACTORY_ADDRESS, TONCENTER } from './config';
 import { buildClaimBody } from './ton';
 
 type Lock = {
@@ -178,6 +178,36 @@ async function jettonIcon(master: string): Promise<string | null> {
     return j.image || null;
   } catch { return null; }
 }
+
+// ── on-chain check: does factory know this master? ───────────────────────
+function stackNum(e: any): bigint {
+  const s = String(Array.isArray(e) ? e[1] : e);
+  if (s.startsWith('-0x')) return -BigInt('0x' + s.slice(3));
+  if (s.startsWith('0x')) return BigInt(s);
+  return BigInt(s);
+}
+
+async function isWhitelistedOnchain(master: string): Promise<boolean> {
+  try {
+    const cell = beginCell().storeAddress(Address.parse(master)).endCell();
+    const res = await fetch(TONCENTER, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: '1', jsonrpc: '2.0', method: 'runGetMethod',
+        params: {
+          address: FACTORY_ADDRESS,
+          method: 'isWalletSet',
+          stack: [['tvm.Slice', cell.toBoc().toString('base64')]],
+        },
+      }),
+    });
+    const json = await res.json();
+    if (!json.ok) return false;
+    return stackNum(json.result.stack[0]) !== 0n;
+  } catch { return false; }
+}
+
 async function refreshWhitelist() {
   const list = document.getElementById('whitelist-list')!;
   list.innerHTML = '<p class="hint">Loading...</p>';
@@ -186,16 +216,23 @@ async function refreshWhitelist() {
     const j = await r.json();
     const wl = j.whitelist || [];
     if (wl.length === 0) { list.innerHTML = '<p class="hint">No approved jettons yet</p>'; return; }
-    list.innerHTML = wl.map((x: any) => `<div class="lock-card">
-      <div class="lock-head">
-        <img data-icon="${x.jetton_master}" width="26" height="26" alt=""
-             style="border-radius:50%;vertical-align:middle;background:#222;margin-right:6px" />
-        <b>${x.symbol || '?'}</b> · ${x.name || '—'}
-      </div>
-      <div class="lock-foot"><code>${x.jetton_master}</code> ·
-        <a href="${EXPLORER(x.jetton_master)}" target="_blank">explorer ↗</a></div>
-    </div>`).join('');
-    // pull icons sequentially (tonapi free tier = 1 req/s)
+    const rows: string[] = [];
+    for (const x of wl) {
+      const onchain = await isWhitelistedOnchain(x.jetton_master);
+      rows.push(`<div class="lock-card">
+        <div class="lock-head">
+          <img data-icon="${x.jetton_master}" width="26" height="26" alt=""
+               style="border-radius:50%;vertical-align:middle;background:#222;margin-right:6px" />
+          <b>${x.symbol || '?'}</b> · ${x.name || '—'}
+          <span style="margin-left:8px;font-size:11px;padding:2px 8px;border-radius:10px;background:${onchain ? '#1d4d2b' : '#6b2b2b'};color:#fff">
+            ${onchain ? 'ON-CHAIN ✓' : 'NOT ON-CHAIN'}
+          </span>
+        </div>
+        <div class="lock-foot"><code>${x.jetton_master}</code> ·
+          <a href="${EXPLORER(x.jetton_master)}" target="_blank">explorer ↗</a></div>
+      </div>`);
+    }
+    list.innerHTML = rows.join('');
     const imgs = Array.from(list.querySelectorAll('img[data-icon]')) as HTMLImageElement[];
     for (const img of imgs) {
       const src = await jettonIcon(img.dataset.icon!);
