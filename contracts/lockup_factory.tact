@@ -243,9 +243,46 @@ contract LockupFactory {
 
         require(context().value >= self.fee_ton + GAS_BUFFER_TON, "attach fee + buffer");
 
-        // Tact already stripped Either for `Slice as remaining`.
-        // The slice begins directly with CreateLock body.
+        // Tact does NOT strip Either for `Slice as remaining`:
+        // slice still carries marker bit + ref. Unwrap manually.
         let sc: Slice = msg.forward_payload;
+        if (sc.remainingBits() > 0 && sc.loadBit()) {
+            sc = sc.loadRef().beginParse();
+        }
+        // Guard: empty/bad payload -> full refund, never exit 9
+        if (sc.remainingBits() < 694 || sc.preloadUint(32) != CREATE_LOCK_OP) {
+            send(SendParameters{
+                to: factoryWallet!!,
+                value: TRANSFER_GAS,
+                mode: SendPayGasSeparately,
+                body: JettonTransfer{
+                    query_id: 0,
+                    amount: msg.amount,
+                    destination: msg.sender,
+                    response_destination: msg.sender,
+                    custom_payload: null,
+                    forward_ton_amount: 0,
+                    forward_payload: emptySlice()
+                }.toCell()
+            });
+            let back: Int = context().value - TRANSFER_GAS;
+            if (back > 0) {
+                send(SendParameters{
+                    to: msg.sender,
+                    value: back,
+                    mode: SendPayGasSeparately,
+                    body: emptyCell()
+                });
+            }
+            emit(LockCreationFailed{
+                lock_id: 0,
+                creator: msg.sender,
+                beneficiary: msg.sender,
+                jetton: jetton_master,
+                amount: msg.amount
+            }.toCell());
+            return;
+        }
         require(sc.loadUint(32) == CREATE_LOCK_OP, "wrong op");
         let qid: Int = sc.loadUint(64);
         let jm_in_payload: Address = sc.loadAddress();
