@@ -1,7 +1,41 @@
 import { Address, beginCell, toNano } from '@ton/core';
 import type { TonConnectUI } from '@tonconnect/ui';
-import { FACTORY_ADDRESS, IS_TEST } from './config';
+import { FACTORY_ADDRESS, IS_TEST, TONCENTER } from './config';
 import { getUserJettonWallet } from './ton';
+
+// Read mutable fees from factory; fallback to deploy defaults if RPC down.
+async function getFactoryFees(): Promise<{ feeBps: number; feeTon: bigint }> {
+  try {
+    const res = await fetch(TONCENTER, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: '1', jsonrpc: '2.0', method: 'runGetMethod',
+        params: { address: FACTORY_ADDRESS, method: 'feeBps', stack: [] },
+      }),
+    });
+    const bpsJson = await res.json();
+    if (!bpsJson.ok) throw new Error('feeBps failed');
+    const feeBps = Number(BigInt('0x' + bpsJson.result.stack[0][1].slice(2)));
+
+    const res2 = await fetch(TONCENTER, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: '2', jsonrpc: '2.0', method: 'runGetMethod',
+        params: { address: FACTORY_ADDRESS, method: 'feeTon', stack: [] },
+      }),
+    });
+    const tonJson = await res2.json();
+    if (!tonJson.ok) throw new Error('feeTon failed');
+    const feeTon = BigInt('0x' + tonJson.result.stack[0][1].slice(2));
+
+    return { feeBps, feeTon };
+  } catch (e) {
+    console.warn('Toncenter failed, using defaults:', e);
+    return { feeBps: 50, feeTon: toNano('1') };
+  }
+}
 
 export function mountWizard(tc: TonConnectUI) {
   const submitBtn = document.getElementById('submit-btn') as HTMLButtonElement;
@@ -27,7 +61,7 @@ export function mountWizard(tc: TonConnectUI) {
 
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
-    setStatus('Building transaction...');
+    setStatus('Reading current fees from factory...');
     try {
       const w = tc.wallet;
       if (!w) throw new Error('Wallet not connected');
@@ -41,10 +75,14 @@ export function mountWizard(tc: TonConnectUI) {
       const amountNano = BigInt(Math.round(parseFloat(amount) * 1e9));
       const queryId = BigInt(Date.now());
 
-      setStatus('Looking up your jetton wallet...');
+      const { feeBps, feeTon } = await getFactoryFees();
+      const gasBuffer = toNano('0.25');
+      const forwardTon = feeTon + gasBuffer;
+      const outerValue = forwardTon + toNano('0.2');
+
+      setStatus(`Fees: ${feeBps / 100}% + ${Number(feeTon) / 1e9} TON. Looking up jetton wallet...`);
       const userJettonWallet = await getUserJettonWallet(jettonMaster, creator);
 
-      // Build CreateLock payload for factory.
       const createLockCell = beginCell()
         .storeUint(0x1, 32)
         .storeUint(queryId, 64)
@@ -69,7 +107,7 @@ export function mountWizard(tc: TonConnectUI) {
         validUntil: Math.floor(Date.now() / 1000) + 300,
         messages: [{
           address: userJettonWallet.toString({ testOnly: IS_TEST }),
-          amount: toNano('1.6').toString(),  // outer gas + forward_ton
+          amount: outerValue.toString(),
           payload: transferBody.toBoc().toString('base64'),
         }],
       });
