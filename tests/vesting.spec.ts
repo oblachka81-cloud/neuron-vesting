@@ -1211,4 +1211,66 @@ describe('NEURON Vesting — full suite (v2.5.1 / v2.6.1)', () => {
             expect(await wallet.getAvailableClaimable()).toEqual(0n);
         });
     });
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Factory: v2.6 guard (regression for empty/bad payload — exit 9 → refund)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    describe('Factory: v2.6 payload guard', () => {
+        it('56. empty forward_payload -> refund instead of exit 9', async () => {
+            const emptyPayload = beginCell().endCell().asSlice();
+
+            const res = await factory.send(
+                fakeJettonWallet.getSender(),
+                { value: ATTACH_TON },
+                makeJettonNotification(999n, JETTON_AMOUNT, user.address, emptyPayload),
+            );
+
+            // Фабрика НЕ упала с exit 9 — guard отработал, транзакция успешна
+            expect(res.transactions).toHaveTransaction({
+                from: fakeJettonWallet.address,
+                to: factory.address,
+                success: true,
+            });
+
+            // LockCreationFailed (0x111) эмитнут
+            expect(res.transactions).toHaveTransaction({
+                from: factory.address,
+                op: 0x111,
+            });
+
+            // ton_fees НЕ увеличился (лок не создан)
+            expect(await factory.getTonFees()).toEqual(0n);
+
+            // nextLockId НЕ увеличился
+            expect(await factory.getNextLockId()).toEqual(1n);
+        });
+
+        it('57. wrong opcode in payload -> refund instead of exit 9', async () => {
+            const badPayload = beginCell()
+                .storeBit(1)
+                .storeRef(
+                    beginCell()
+                        .storeUint(0xDEAD, 32) // неправильный op вместо 0x1
+                        .storeUint(1n, 64)
+                        .endCell(),
+                )
+                .endCell()
+                .asSlice();
+
+            const res = await factory.send(
+                fakeJettonWallet.getSender(),
+                { value: ATTACH_TON },
+                makeJettonNotification(888n, JETTON_AMOUNT, user.address, badPayload),
+            );
+
+            expect(res.transactions).toHaveTransaction({
+                from: fakeJettonWallet.address,
+                to: factory.address,
+                success: true,
+            });
+            expect(await factory.getTonFees()).toEqual(0n);
+            expect(await factory.getNextLockId()).toEqual(1n);
+        });
+    });
 });
