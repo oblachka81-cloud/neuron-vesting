@@ -246,3 +246,13 @@ async function refreshWhitelist() {
 
 // expose to tab switcher
 (window as any).__nv = { refreshLocks, refreshApps, refreshWhitelist };
+
+// dynamic pill: reflects on-chain state of COGNIQ in new factory
+(async () => {
+  const el = document.getElementById('pill-wl');
+  if (!el) return;
+  const ok = await isWhitelistedOnchain('EQDOjRZ5rbSnBBvhsv4g0JNN67p89617_2pNc_AO1dTEkaNg');
+  el.textContent = ok ? 'COGNIQ WHITELISTED ✓' : 'COGNIQ: NOT WHITELISTED';
+  el.style.background = ok ? '#1d4d2b' : '#6b2b2b';
+  el.style.color = '#fff';
+})();
