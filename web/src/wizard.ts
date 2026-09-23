@@ -5,36 +5,31 @@ import { getUserJettonWallet } from './ton';
 
 // Read mutable fees from factory; fallback to deploy defaults if RPC down.
 async function getFactoryFees(): Promise<{ feeBps: number; feeTon: bigint }> {
-  try {
-    const res = await fetch(TONCENTER, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        id: '1', jsonrpc: '2.0', method: 'runGetMethod',
-        params: { address: FACTORY_ADDRESS, method: 'feeBps', stack: [] },
-      }),
-    });
-    const bpsJson = await res.json();
-    if (!bpsJson.ok) throw new Error('feeBps failed');
-    const feeBps = Number(BigInt('0x' + bpsJson.result.stack[0][1].slice(2)));
-
-    const res2 = await fetch(TONCENTER, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        id: '2', jsonrpc: '2.0', method: 'runGetMethod',
-        params: { address: FACTORY_ADDRESS, method: 'feeTon', stack: [] },
-      }),
-    });
-    const tonJson = await res2.json();
-    if (!tonJson.ok) throw new Error('feeTon failed');
-    const feeTon = BigInt('0x' + tonJson.result.stack[0][1].slice(2));
-
-    return { feeBps, feeTon };
-  } catch (e) {
-    console.warn('Toncenter failed, using defaults:', e);
-    return { feeBps: 50, feeTon: toNano('1') };
+  const batch = [
+    { id: '1', jsonrpc: '2.0', method: 'runGetMethod', params: { address: FACTORY_ADDRESS, method: 'feeBps', stack: [] } },
+    { id: '2', jsonrpc: '2.0', method: 'runGetMethod', params: { address: FACTORY_ADDRESS, method: 'feeTon', stack: [] } },
+  ];
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const res = await fetch(TONCENTER, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(batch),
+      });
+      const json = await res.json();
+      if (Array.isArray(json) && json.length === 2 && json[0].ok && json[1].ok) {
+        const feeBps = Number(BigInt(json[0].result.stack[0][1]));
+        const feeTon = BigInt(json[1].result.stack[0][1]);
+        return { feeBps, feeTon };
+      }
+      console.warn('fees attempt', attempt, json);
+    } catch (e) {
+      console.warn('fees fetch failed', e);
+    }
+    await new Promise((r) => setTimeout(r, 1300));
   }
+  console.warn('fees: fallback to defaults');
+  return { feeBps: 50, feeTon: toNano('1') };
 }
 
 export function mountWizard(tc: TonConnectUI) {
