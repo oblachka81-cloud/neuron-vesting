@@ -60,9 +60,9 @@ export function mountWizard(tc: TonConnectUI) {
         .storeAddress(Address.parse(FACTORY_ADDRESS))
         .storeAddress(creator)
         .storeBit(0)
-        .storeCoins(toNano('1.4'))
+        .storeCoins(forwardTon)
         .storeBit(1)
-        .storeRef(createLockCell)   // ← НАПРЯМУЮ, без обёртки
+        .storeRef(createLockCell)
         .endCell();
 
       await tc.sendTransaction({
