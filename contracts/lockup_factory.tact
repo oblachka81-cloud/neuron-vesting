@@ -246,13 +246,18 @@ contract LockupFactory {
         // Tact does NOT strip Either for `Slice as remaining`.
         // Slice carries marker bit + ref. Unwrap manually.
         let sc: Slice = msg.forward_payload;
-        
+        let parsed: Bool = false;
         if (!sc.empty()) {
             if (sc.loadBit()) {
                 sc = sc.loadRef().beginParse();
             }
-        } else {
-            // Empty payload -> refund jettons to creator
+            // Full CreateLock body = 32+64+267+267+64 = 694 bits
+            if (sc.bits() >= 694 && sc.preloadUint(32) == CREATE_LOCK_OP) {
+                parsed = true;
+            }
+        }
+        if (!parsed) {
+            // Bad/empty/truncated payload -> refund jettons + TON, never exit 9
             send(SendParameters{
                 to: factoryWallet!!,
                 value: TRANSFER_GAS,
@@ -285,8 +290,7 @@ contract LockupFactory {
             }.toCell());
             return;
         }
-        
-        require(sc.loadUint(32) == CREATE_LOCK_OP, "wrong op");
+        sc.skipBits(32); // consume CREATE_LOCK_OP (already verified by preload)
         let qid: Int = sc.loadUint(64);
         let jm_in_payload: Address = sc.loadAddress();
         let ben: Address = sc.loadAddress();
