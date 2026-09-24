@@ -736,7 +736,7 @@ describe('NEURON Vesting — v4 (isolated + TEP-89)', () => {
                 forward_payload: beginCell().endCell().asSlice(),
             });
             expect(res.transactions).toHaveTransaction({
-                from: fakeJettonWallet.address, to: wallet.address, success: true,
+                from: fakeJettonWallet.address, to: wallet.address, success: false,
             });
             expect(await wallet.getIsFunded()).toEqual(false);
         });
