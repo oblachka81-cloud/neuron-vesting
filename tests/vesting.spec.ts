@@ -33,11 +33,14 @@ function makeJettonNotify(
 }
 
 function makeTakeWalletAddress(qid: bigint, wallet: Address, owner: Address) {
+    // owner_address теперь Cell? (Maybe ^MsgAddress).
+    // Собираем Cell с адресом внутри и передаём как Cell — Tact сериализует его как Maybe ref.
+    const ownerCell = beginCell().storeAddress(owner).endCell();
     return {
         $$type: 'TakeWalletAddress' as const,
         query_id: qid,
         wallet_address: wallet,
-        owner_address: owner,
+        owner_address: ownerCell,
     };
 }
 
