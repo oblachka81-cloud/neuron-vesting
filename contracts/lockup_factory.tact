@@ -54,7 +54,6 @@ message(0x115) RefundRequired { creator: Address; jetton: Address; amount: Int a
 
 const GAS_BUFFER_TON: Int = ton("0.6");
 const DEPLOY_GAS: Int = ton("0.2");
-const DISCOVERY_GAS: Int = ton("0.1");
 const TRANSFER_GAS: Int = ton("0.3");
 const RESCUE_GAS: Int = ton("0.3");
 const MAX_LOCK_DURATION: Int = 315360000;
