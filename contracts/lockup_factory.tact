@@ -166,9 +166,6 @@ const TRANSFER_GAS: Int = ton("0.05");
 /// jetton wallets require a non-zero value to emit a notification.
 const TRANSFER_FORWARD: Int = ton("0.01");
 
-/// Gas attached to a TEP-89 `provide_wallet_address` request.
-const DISCOVERY_GAS: Int = ton("0.05");
-
 /// Gas attached when rescuing jettons from the factory's jetton wallet.
 const RESCUE_GAS: Int = ton("0.05");
 
