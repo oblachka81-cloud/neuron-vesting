@@ -7,8 +7,7 @@ const RESERVE_GAS = toNano('0.06');
 const MULTISIG_VALUE = toNano('0.2');
 
 const FACTORIES: [string, string][] = [
-    ['salt3',  'EQBh5qfBk5q_du4aw4pBnxee0_FFKTmBkVIiS2G2ZkWGqhZL'],
-    ['salt2',  'EQDchgRlQ02H69hwys9ZGdQiiaqvt6OVVeKQvNb6LWlj0S5z'],
+    ['salt4', 'EQAIvqEAQtEnF6JDU0nhGSpZEbE8TlZAilLkLps23WjVps_B'],
 ];
 
 async function rpc(method: string, params: any, apiKey?: string): Promise<any> {
