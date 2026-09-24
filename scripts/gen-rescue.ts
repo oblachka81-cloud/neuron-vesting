@@ -3,14 +3,12 @@ import { Address, beginCell, toNano } from '@ton/core';
 const RPC = 'https://toncenter.com/api/v2/jsonRPC';
 const TO = Address.parse('UQBniD_M-MTeVqUbWshZrXdQcz0m8lPstG3mQg1AL5KKCGSv');
 
-// 0.06 вместо 0.05 — с запасом на storage fee (121 нанотон) и fwd_fee.
-// Именно из-за этих 121 нанотона прошлый RescueTon упал с exit 57877.
 const RESERVE_GAS = toNano('0.06');
 const MULTISIG_VALUE = toNano('0.2');
 
-// salt2 временно отключён — адрес кривой, скрипт падал на Address.parse.
 const FACTORIES: [string, string][] = [
-    ['salt3', 'EQBh5qfBk5q_du4aw4pBnxee0_FFKTmBkVIiS2G2ZkWGqhZL'],
+    ['salt3',  'EQBh5qfBk5q_du4aw4pBnxee0_FFKTmBkVIiS2G2ZkWGqhZL'],
+    ['salt2',  'EQDchgRlQ02H69hwys9ZGdQiiagvt60VVekQvNb6LWlj0S5z'],
 ];
 
 async function rpc(method: string, params: any, apiKey?: string): Promise<any> {
@@ -50,9 +48,6 @@ function buildBody(op: number, queryId: bigint, amount: bigint, dest: Address): 
 
 async function main() {
     const apiKey = process.env.TONCENTER_API_KEY || undefined;
-
-    // query_id из Date.now() — гарантирует уникальность при каждом запуске.
-    // Раньше было qid = 900n, из-за чего второй запуск падал с "qid reused".
     let qid = BigInt(Date.now());
 
     for (const [name, addr] of FACTORIES) {
@@ -62,7 +57,6 @@ async function main() {
 
         const rawAddr = Address.parse(addr).toRawString();
 
-        // 1. balance
         let bal: bigint = 0n;
         try {
             const balRes = await rpc('getAddressBalance', { address: rawAddr }, apiKey);
@@ -74,7 +68,6 @@ async function main() {
             continue;
         }
 
-        // 2. tonFees
         let tf = 0n;
         try {
             const g = await rpc('runGetMethod', { address: rawAddr, method: 'tonFees', stack: [] }, apiKey);
@@ -84,7 +77,7 @@ async function main() {
             console.log(`tonFees      : getter failed — assuming 0`);
         }
 
-        // 3. ORDER A — WithdrawTonFees (только если tonFees > 0)
+        // ORDER A: WithdrawTonFees — только если tonFees > 0
         const feeAmount = tf < bal - RESERVE_GAS ? tf : (bal > RESERVE_GAS ? bal - RESERVE_GAS : 0n);
         if (feeAmount > 0n) {
             const body = buildBody(0x22, qid++, feeAmount, TO);
@@ -94,10 +87,10 @@ async function main() {
             console.log(`Amount : ${Number(feeAmount) / 1e9} TON → ${TO.toString()}`);
             console.log(`Body   : ${body}`);
         } else {
-            console.log('\nORDER A: skipped (tonFees = 0 or balance too small)');
+            console.log('\nORDER A: skipped (tonFees = 0)');
         }
 
-        // 4. ORDER B — RescueTon (вывести всё, что сверх RESERVE_GAS)
+        // ORDER B: RescueTon — вывести всё сверх reserve
         const rest = bal - RESERVE_GAS;
         if (rest > 0n) {
             const body = buildBody(0x23, qid++, rest, TO);
@@ -112,10 +105,9 @@ async function main() {
     }
 
     console.log('\n───────────────────────────────────────────────────────────────');
-    console.log('Copy Body into multisig.ton.org → Create new order → Arbitrary order.');
-    console.log('Value always 0.2 TON — this is multisig gas, not withdraw amount.');
+    console.log('Copy Body → multisig.ton.org → Create new order → Arbitrary order.');
+    console.log('Value always 0.2 TON — это газ мультисига, не сумма вывода.');
     console.log('Sign with 2 of 3 signers.');
-    console.log('After execution — rerun workflow to drain the rest.');
     console.log('───────────────────────────────────────────────────────────────');
 }
 
