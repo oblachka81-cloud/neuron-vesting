@@ -93,7 +93,7 @@ const CLAIM_FORWARD: Int = ton("0.01");
 /// Non-empty forward payload. Some TEP-74 implementations (e.g. COGNIQ)
 /// enforce `forward_payload.bits() >= 1` and revert with exit code 708 on
 /// an empty slice. A single zero bit is the minimal valid payload.
-const EMPTY_FORWARD_PAYLOAD: Slice = beginCell().storeBit(0).endCell().asSlice();
+const EMPTY_FORWARD_PAYLOAD: Slice = beginCell().storeBit(false).endCell().asSlice();
 
 // ─── Contract ──────────────────────────────────────────────────────────────
 
