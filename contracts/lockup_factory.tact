@@ -203,18 +203,23 @@ contract LockupFactory {
         let child: Address? = self.pending_create.get(id);
         if (child == null) { return; }
         require(msg.owner_address == child!!, "wrong owner");
-        let jm: Address? = self.create_jetton.get(id);
-        require(jm != null && sender() == jm!!, "not master");
 
-        let amount: Int = self.create_amount.get(id)!!;
+        let jmOpt: Address? = self.create_jetton.get(id);
+        require(jmOpt != null && sender() == jmOpt!!, "not master");
+
+        let amountOpt: Int? = self.create_amount.get(id);
+        require(amountOpt != null, "no amount");
+
+        let jwOpt: Address? = self.own_wallets.get(jmOpt!!);
+        require(jwOpt != null, "no factory wallet");
 
         send(SendParameters{
-            to: self.own_wallets.get(jm!!)!!,
+            to: jwOpt!!,
             value: TRANSFER_GAS,
             mode: SendPayGasSeparately,
             body: JettonTransfer{
                 query_id: qid,
-                amount: amount,
+                amount: amountOpt!!,
                 destination: msg.wallet_address,
                 response_destination: myAddress(),
                 custom_payload: null,
@@ -273,19 +278,27 @@ contract LockupFactory {
             let child: Address? = self.pending_create.get(id);
             if (child == null) { return; }
 
-            let jm: Address? = self.create_jetton.get(id);
-            require(jm != null, "no jetton");
-            let jw: Address = self.own_wallets.get(jm!!)!!;
-            require(sender() == jw, "bounce from wrong wallet");
+            let jmOpt: Address? = self.create_jetton.get(id);
+            let creatorOpt: Address? = self.create_creator.get(id);
+            let amountOpt: Int? = self.create_amount.get(id);
+            let feeOpt: Int? = self.create_fee_jetton.get(id);
+            let tonOpt: Int? = self.create_fee_ton.get(id);
 
-            let creator: Address = self.create_creator.get(id)!!;
-            let amount: Int = self.create_amount.get(id)!!;
-            let fee: Int = self.create_fee_jetton.get(id)!!;
-            let charged_ton: Int = self.create_fee_ton.get(id)!!;
+            require(jmOpt != null && creatorOpt != null && amountOpt != null && feeOpt != null && tonOpt != null, "inconsistent create state");
 
-            let opt: Int? = self.fees.get(jm!!);
-            let cur: Int = opt != null ? opt!! : 0;
-            self.fees.set(jm!!, cur > fee ? cur - fee : 0);
+            let jm: Address = jmOpt!!;
+            let creator: Address = creatorOpt!!;
+            let amount: Int = amountOpt!!;
+            let fee: Int = feeOpt!!;
+            let charged_ton: Int = tonOpt!!;
+
+            let jwOpt: Address? = self.own_wallets.get(jm);
+            require(jwOpt != null, "no factory wallet");
+            require(sender() == jwOpt!!, "bounce from wrong wallet");
+
+            let curFeeOpt: Int? = self.fees.get(jm);
+            let curFee: Int = curFeeOpt != null ? curFeeOpt!! : 0;
+            self.fees.set(jm, curFee > fee ? curFee - fee : 0);
 
             if (self.ton_fees >= charged_ton) {
                 self.ton_fees = self.ton_fees - charged_ton;
@@ -293,7 +306,7 @@ contract LockupFactory {
             }
 
             emit(CreateBounced{ lock_id: id, amount: amount }.toCell());
-            emit(RefundRequired{ creator: creator, jetton: jm!!, amount: amount + fee }.toCell());
+            emit(RefundRequired{ creator: creator, jetton: jm, amount: amount + fee }.toCell());
 
             self.pending_create.set(id, null);
             self.create_creator.set(id, null);
@@ -308,8 +321,9 @@ contract LockupFactory {
         let jmOpt: Address? = self.pending_withdraw_jetton.get(qid);
         if (amtOpt != null && jmOpt != null) {
             let jm: Address = jmOpt!!;
-            let jw: Address = self.own_wallets.get(jm)!!;
-            require(sender() == jw, "withdraw bounce from wrong wallet");
+            let jwOpt: Address? = self.own_wallets.get(jm);
+            require(jwOpt != null, "no factory wallet");
+            require(sender() == jwOpt!!, "withdraw bounce from wrong wallet");
 
             let opt: Int? = self.fees.get(jm);
             let cur: Int = opt != null ? opt!! : 0;
@@ -332,16 +346,30 @@ contract LockupFactory {
 
     receive(msg: RescueTon) {
         require(sender() == self.treasury, "not treasury");
+        require(msg.query_id > 0, "qid 0");
         require(msg.amount > 0, "zero");
-        require(myBalance() >= msg.amount + ton("0.05"), "not enough");
+        require(self.used_qids.get(msg.query_id) == null, "qid reused");
+
+        let reserved: Int = self.ton_fees + ton("0.05");
+        let available: Int = myBalance() - reserved;
+        require(available >= msg.amount, "not enough after reserving fees");
+
+        self.used_qids.set(msg.query_id, true);
+
         send(SendParameters{ to: msg.destination, value: msg.amount, mode: SendPayGasSeparately, body: emptyCell() });
     }
 
     receive(msg: RescueJetton) {
         require(sender() == self.treasury, "not treasury");
+        require(msg.query_id > 0, "qid 0");
         require(msg.amount > 0, "zero");
+        require(self.used_qids.get(msg.query_id) == null, "qid reused");
+
         let jw: Address? = self.own_wallets.get(msg.jetton_master);
         require(jw != null, "not whitelisted");
+
+        self.used_qids.set(msg.query_id, true);
+
         send(SendParameters{
             to: jw!!,
             value: RESCUE_GAS,
