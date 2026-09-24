@@ -90,52 +90,57 @@ contract LockupWallet {
     }
 
     receive(msg: TakeWalletAddress) {
-        require(sender() == self.jetton_master, "not master");
+    require(sender() == self.jetton_master, "not master");
 
-        if (self.pending_claim
-            && msg.owner_address == self.beneficiary
-            && msg.query_id == self.pending_query_id) {
-            require(self.jetton_wallet != null, "no wallet");
+    // owner_address приходит как Maybe ^MsgAddress (1 бит + ref)
+    let ownerOpt: Cell? = msg.owner_address;
+    require(ownerOpt != null, "no owner");
+    let owner: Address = ownerOpt!!.beginParse().loadAddress();
 
-            self.claimed = self.claimed + self.pending_amount;
+    if (self.pending_claim
+        && owner == self.beneficiary
+        && msg.query_id == self.pending_query_id) {
+        require(self.jetton_wallet != null, "no wallet");
 
-            send(SendParameters{
-                to: self.jetton_wallet!!,
-                value: CLAIM_GAS,
-                mode: SendPayGasSeparately,
-                body: JettonTransfer{
-                    query_id: self.pending_query_id,
-                    amount: self.pending_amount,
-                    destination: msg.wallet_address,
-                    response_destination: myAddress(),
-                    custom_payload: null,
-                    forward_ton_amount: CLAIM_FORWARD,
-                    forward_payload: emptySlice()
-                }.toCell()
-            });
+        self.claimed = self.claimed + self.pending_amount;
 
-            emit(Claimed{
-                lock_id: self.lock_id,
+        send(SendParameters{
+            to: self.jetton_wallet!!,
+            value: CLAIM_GAS,
+            mode: SendPayGasSeparately,
+            body: JettonTransfer{
+                query_id: self.pending_query_id,
                 amount: self.pending_amount,
-                beneficiary: self.beneficiary,
-                beneficiary_wallet: msg.wallet_address
-            }.toCell());
+                destination: msg.wallet_address,
+                response_destination: myAddress(),
+                custom_payload: null,
+                forward_ton_amount: CLAIM_FORWARD,
+                forward_payload: emptySlice()
+            }.toCell()
+        });
 
-            return;
-        }
+        emit(Claimed{
+            lock_id: self.lock_id,
+            amount: self.pending_amount,
+            beneficiary: self.beneficiary,
+            beneficiary_wallet: msg.wallet_address
+        }.toCell());
 
-        if (msg.owner_address == myAddress() && self.jetton_wallet == null) {
-            self.jetton_wallet = msg.wallet_address;
-
-            let fs: Address? = self.fund_sender;
-            if (fs != null && fs!! == msg.wallet_address && !self.funded) {
-                self.funded = true;
-                self.fund_sender = null;
-                emit(LockFunded{ lock_id: self.lock_id, amount: self.total_amount }.toCell());
-            }
-            return;
-        }
+        return;
     }
+
+    if (owner == myAddress() && self.jetton_wallet == null) {
+        self.jetton_wallet = msg.wallet_address;
+
+        let fs: Address? = self.fund_sender;
+        if (fs != null && fs!! == msg.wallet_address && !self.funded) {
+            self.funded = true;
+            self.fund_sender = null;
+            emit(LockFunded{ lock_id: self.lock_id, amount: self.total_amount }.toCell());
+        }
+        return;
+    }
+}
 
     receive(msg: JettonNotification) {
         let jw: Address? = self.jetton_wallet;
