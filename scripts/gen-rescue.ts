@@ -8,7 +8,7 @@ const MULTISIG_VALUE = toNano('0.2');
 
 const FACTORIES: [string, string][] = [
     ['salt3',  'EQBh5qfBk5q_du4aw4pBnxee0_FFKTmBkVIiS2G2ZkWGqhZL'],
-    ['salt2',  'EQDchgRlQ02H69hwys9ZGdQiiagvt60VVekQvNb6LWlj0S5z'],
+    ['salt2',  'EQDchgRlQ02H69hwys9ZGdQiiaqvt6OVVeKQvNb6LWlj0S5z'],
 ];
 
 async function rpc(method: string, params: any, apiKey?: string): Promise<any> {
