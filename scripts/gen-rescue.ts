@@ -35,7 +35,7 @@ async function main() {
       console.log(`ORDER A (Target=${addr}, Value=0.2) WithdrawTonFees ${Number(feeTake) / 1e9} TON:`);
       console.log(beginCell().storeUint(0x22, 32).storeUint(qid++, 64).storeCoins(feeTake).storeAddress(TO).endCell().toBoc().toString('base64'));
     }
-    const rest = bal - feeTake - (tf - feeTake) + 130_000_000n - 60_000_000n;
+    const rest = bal - 50_000_000n;
     if (rest > 0n) {
       console.log(`ORDER B (Target=${addr}, Value=0.2) RescueTon ${Number(rest) / 1e9} TON:`);
       console.log(beginCell().storeUint(0x23, 32).storeUint(qid++, 64).storeCoins(rest).storeAddress(TO).endCell().toBoc().toString('base64'));
