@@ -4,7 +4,7 @@ const RPC = 'https://toncenter.com/api/v2/jsonRPC';
 const TO = Address.parse('UQBniD_M-MTeVqUbWshZrXdQcz0m8lPstG3mQg1AL5KKCGSv');
 
 const RESERVE_GAS = toNano('0.06');
-const MULTISIG_VALUE = toNano('0.2');
+const MULTISIG_VALUE = toNano('0.05');
 
 const FACTORIES: [string, string][] = [
     ['salt4', 'EQAIvqEAQtEnF6JDU0nhGSpZEbE8TlZAilLkLps23WjVps_B'],
