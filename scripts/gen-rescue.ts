@@ -2,12 +2,15 @@ import { Address, beginCell, toNano } from '@ton/core';
 
 const RPC = 'https://toncenter.com/api/v2/jsonRPC';
 const TO = Address.parse('UQBniD_M-MTeVqUbWshZrXdQcz0m8lPstG3mQg1AL5KKCGSv');
-const RESERVE_GAS = toNano('0.05');
+
+// 0.06 вместо 0.05 — с запасом на storage fee (121 нанотон) и fwd_fee.
+// Именно из-за этих 121 нанотона прошлый RescueTon упал с exit 57877.
+const RESERVE_GAS = toNano('0.06');
 const MULTISIG_VALUE = toNano('0.2');
 
+// salt2 временно отключён — адрес кривой, скрипт падал на Address.parse.
 const FACTORIES: [string, string][] = [
     ['salt3', 'EQBh5qfBk5q_du4aw4pBnxee0_FFKTmBkVIiS2G2ZkWGqhZL'],
-    ['salt2', 'EQDchgRlQ02H69hwys9ZGdQiiagvt60VVekQvNb6LWljO5Sz'],
 ];
 
 async function rpc(method: string, params: any, apiKey?: string): Promise<any> {
@@ -47,7 +50,10 @@ function buildBody(op: number, queryId: bigint, amount: bigint, dest: Address): 
 
 async function main() {
     const apiKey = process.env.TONCENTER_API_KEY || undefined;
-    let qid = 900n;
+
+    // query_id из Date.now() — гарантирует уникальность при каждом запуске.
+    // Раньше было qid = 900n, из-за чего второй запуск падал с "qid reused".
+    let qid = BigInt(Date.now());
 
     for (const [name, addr] of FACTORIES) {
         console.log('\n═══════════════════════════════════════════════════════════════');
@@ -78,7 +84,7 @@ async function main() {
             console.log(`tonFees      : getter failed — assuming 0`);
         }
 
-        // 3. ORDER A — WithdrawTonFees
+        // 3. ORDER A — WithdrawTonFees (только если tonFees > 0)
         const feeAmount = tf < bal - RESERVE_GAS ? tf : (bal > RESERVE_GAS ? bal - RESERVE_GAS : 0n);
         if (feeAmount > 0n) {
             const body = buildBody(0x22, qid++, feeAmount, TO);
@@ -91,7 +97,7 @@ async function main() {
             console.log('\nORDER A: skipped (tonFees = 0 or balance too small)');
         }
 
-        // 4. ORDER B — RescueTon
+        // 4. ORDER B — RescueTon (вывести всё, что сверх RESERVE_GAS)
         const rest = bal - RESERVE_GAS;
         if (rest > 0n) {
             const body = buildBody(0x23, qid++, rest, TO);
