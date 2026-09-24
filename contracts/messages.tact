@@ -1,10 +1,4 @@
-// ═══════════════════════════════════════════════════════════════════════════
-// NEURON Vesting — shared TEP-74 message types
-// ═══════════════════════════════════════════════════════════════════════════
-// Imported by both LockupFactory and LockupWallet.
-// Tact automatically strips Either Cell Slice for `Slice as remaining`,
-// so downstream code receives the Cell's content directly in the slice.
-// ═══════════════════════════════════════════════════════════════════════════
+import "@stdlib/deploy";
 
 message(0x0f8a7ea5) JettonTransfer {
     query_id: Int as uint64;
@@ -21,4 +15,20 @@ message(0x7362d09c) JettonNotification {
     amount: Int as coins;
     sender: Address;
     forward_payload: Slice as remaining;
+}
+
+message(0x2c76b973) ProvideWalletAddress {
+    query_id: Int as uint64;
+    owner_address: Address;
+    include_address: Bool;
+}
+
+message(0xd1735400) TakeWalletAddress {
+    query_id: Int as uint64;
+    wallet_address: Address;
+    owner_address: Address;
+}
+
+message(0xd53276db) JettonExcesses {
+    query_id: Int as uint64;
 }
