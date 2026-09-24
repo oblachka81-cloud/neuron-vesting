@@ -185,11 +185,6 @@ const MAX_FEE_BPS: Int = 1000;
 /// unlock_at (64). Used to reject malformed payloads before parsing.
 const CREATE_LOCK_PAYLOAD_BITS: Int = 694;
 
-/// Non-empty forward payload. Some TEP-74 jetton wallets (e.g. COGNIQ)
-/// enforce `forward_payload.bits() >= 1` and revert with exit code 708
-/// on an empty slice. A single zero bit is the minimal valid payload.
-const EMPTY_FORWARD_PAYLOAD: Slice = beginCell().storeBit(0).endCell().asSlice();
-
 // ─── Contract ──────────────────────────────────────────────────────────────
 
 contract LockupFactory {
