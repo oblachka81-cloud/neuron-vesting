@@ -71,7 +71,7 @@ export function mountWizard(tc: TonConnectUI) {
       const queryId = BigInt(Date.now());
 
       const { feeBps, feeTon } = await getFactoryFees();
-      const gasBuffer = toNano('0.25');
+      const gasBuffer = toNano('0.6');
       const forwardTon = feeTon + gasBuffer;
       const outerValue = forwardTon + toNano('0.2');
 
