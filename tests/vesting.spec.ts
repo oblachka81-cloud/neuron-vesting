@@ -1,14 +1,12 @@
 import { Blockchain, SandboxContract, TreasuryContract } from '@ton/sandbox';
-import { toNano, beginCell, Address } from '@ton/core';
+import { toNano, beginCell, Address, Cell } from '@ton/core';
 import { LockupFactory } from '../build/LockupFactory_LockupFactory';
 import { LockupWallet } from '../build/LockupFactory_LockupWallet';
 import '@ton/test-utils';
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Helpers
-// ═══════════════════════════════════════════════════════════════════════════
+// ── Helpers ────────────────────────────────────────────────────────────────
 
-function makeLockPayload(qid: bigint, jm: Address, ben: Address, unlockAt: bigint) {
+function makeLockPayload(qid: bigint, jm: Address, ben: Address, unlockAt: bigint): Cell {
     const inner = beginCell()
         .storeUint(0x1, 32)
         .storeUint(qid, 64)
@@ -16,29 +14,43 @@ function makeLockPayload(qid: bigint, jm: Address, ben: Address, unlockAt: bigin
         .storeAddress(ben)
         .storeUint(unlockAt, 64)
         .endCell();
-    return beginCell().storeBit(1).storeRef(inner).endCell().asSlice();
+    return beginCell().storeBit(1).storeRef(inner).endCell();
 }
 
-function makeJettonNotification(
+function makeJettonNotify(
     queryId: bigint,
     amount: bigint,
     sender: Address,
-    payload: any,
+    payload: Cell,
 ) {
     return {
         $$type: 'JettonNotification' as const,
         query_id: queryId,
         amount: amount,
         sender: sender,
-        forward_payload: payload,
+        forward_payload: payload.asSlice(),
     };
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Suite
-// ═══════════════════════════════════════════════════════════════════════════
+function makeTakeWalletAddress(qid: bigint, wallet: Address, owner: Address) {
+    return {
+        $$type: 'TakeWalletAddress' as const,
+        query_id: qid,
+        wallet_address: wallet,
+        owner_address: owner,
+    };
+}
 
-describe('NEURON Vesting — full suite (v2.5.1 / v2.6.1)', () => {
+function makeExcesses(queryId: bigint) {
+    return {
+        $$type: 'JettonExcesses' as const,
+        query_id: queryId,
+    };
+}
+
+// ── Suite ──────────────────────────────────────────────────────────────────
+
+describe('NEURON Vesting — v4 (isolated + TEP-89)', () => {
     let blockchain: Blockchain;
     let treasury: SandboxContract<TreasuryContract>;
     let user: SandboxContract<TreasuryContract>;
@@ -49,11 +61,12 @@ describe('NEURON Vesting — full suite (v2.5.1 / v2.6.1)', () => {
     let factory: SandboxContract<LockupFactory>;
 
     const FEE_TON = toNano('1');
-    const BUFFER_TON = toNano('0.25');
-    const ATTACH_TON = toNano('1.3'); // fee + buffer + slack
+    const ATTACH_TON = toNano('1.65');
     const JETTON_AMOUNT = 1_000_000_000n;
-    const FEE_JETTON = (JETTON_AMOUNT * 50n) / 10000n; // 0.5%
+    const FEE_BPS = 50n;
+    const FEE_JETTON = (JETTON_AMOUNT * FEE_BPS) / 10000n;
     const LOCK_AMOUNT = JETTON_AMOUNT - FEE_JETTON;
+    const HIGH_BIT = 1n << 63n;
 
     beforeEach(async () => {
         blockchain = await Blockchain.create();
@@ -66,14 +79,11 @@ describe('NEURON Vesting — full suite (v2.5.1 / v2.6.1)', () => {
         fakeJettonWallet = await blockchain.treasury('jettonWallet');
         attacker = await blockchain.treasury('attacker');
 
-        // Matches deploy defaults: salt=1, fee_bps=50 (0.5%), fee_ton=1 TON
         factory = blockchain.openContract(
-        await LockupFactory.fromInit(treasury.address, 1n, 50n, 1000000000n),
-     );
-        // fund the factory with some TON
+            await LockupFactory.fromInit(treasury.address, 3n, 50n, 1000000000n),
+        );
         await factory.send(treasury.getSender(), { value: toNano('10') }, null);
 
-        // whitelist the fake jetton wallet
         await factory.send(
             treasury.getSender(),
             { value: toNano('0.5') },
@@ -86,1186 +96,687 @@ describe('NEURON Vesting — full suite (v2.5.1 / v2.6.1)', () => {
         );
     });
 
-    // ─── helpers ────────────────────────────────────────────────────────────
-
-    async function createLock(unlockAt: bigint, qid: bigint = 1n) {
+    async function sendCreateLock(unlockAt: bigint, qid: bigint = 1n) {
         const payload = makeLockPayload(qid, jettonMaster.address, beneficiary.address, unlockAt);
-        await factory.send(
+        return factory.send(
             fakeJettonWallet.getSender(),
             { value: ATTACH_TON },
-            makeJettonNotification(qid, JETTON_AMOUNT, user.address, payload),
-        );
-        return blockchain.openContract(
-            await LockupWallet.fromInit(
-                1n,
-                factory.address,
-                jettonMaster.address,
-                fakeJettonWallet.address, // jetton_wallet passed in
-                beneficiary.address,
-                user.address,
-                LOCK_AMOUNT,
-                unlockAt,
-            ),
-        );
-    }
-
-    async function fundWallet(
-        wallet: SandboxContract<LockupWallet>,
-        from: SandboxContract<TreasuryContract> = fakeJettonWallet,
-        amount: bigint = LOCK_AMOUNT,
-        qid: bigint = 2n,
-    ) {
-        return wallet.send(
-            from.getSender(),
-            { value: toNano('0.1') },
-            {
-                $$type: 'JettonNotification',
-                query_id: qid,
-                amount: amount,
-                sender: user.address,
-                forward_payload: beginCell().endCell().asSlice(),
-            },
+            makeJettonNotify(qid, JETTON_AMOUNT, user.address, payload),
         );
     }
 
     // ═══════════════════════════════════════════════════════════════════════
-    // Factory: setup & whitelist
-    // ═══════════════════════════════════════════════════════════════════════
-
     describe('Factory: setup', () => {
-        it('1. deploys factory with nextLockId = 1', async () => {
+        it('1. nextLockId = 1 after init', async () => {
             expect(await factory.getNextLockId()).toEqual(1n);
         });
 
-        it('2. whitelist sets own_wallets and wallet_to_master', async () => {
-            expect(await factory.getWalletOf(jettonMaster.address)).toEqualAddress(
-                fakeJettonWallet.address,
-            );
-            expect(await factory.getMasterOf(fakeJettonWallet.address)).toEqualAddress(
-                jettonMaster.address,
-            );
+        it('2. whitelist sets own_wallets', async () => {
+            expect(await factory.getWalletOf(jettonMaster.address)).toEqualAddress(fakeJettonWallet.address);
             expect(await factory.getIsWalletSet(jettonMaster.address)).toEqual(true);
         });
 
         it('3. whitelist by non-treasury -> rejected', async () => {
-            const newMaster = await blockchain.treasury('newMaster');
-            const newWallet = await blockchain.treasury('newWallet');
-            const res = await factory.send(
-                attacker.getSender(),
-                { value: toNano('0.5') },
-                {
-                    $$type: 'SetJettonWallet',
-                    query_id: 2n,
-                    jetton_master: newMaster.address,
-                    jetton_wallet: newWallet.address,
-                },
-            );
-            expect(res.transactions).toHaveTransaction({
-                from: attacker.address,
-                to: factory.address,
-                success: false,
+            const m = await blockchain.treasury('m');
+            const w = await blockchain.treasury('w');
+            const res = await factory.send(attacker.getSender(), { value: toNano('0.5') }, {
+                $$type: 'SetJettonWallet',
+                query_id: 2n,
+                jetton_master: m.address,
+                jetton_wallet: w.address,
             });
+            expect(res.transactions).toHaveTransaction({ from: attacker.address, to: factory.address, success: false });
         });
 
-        it('4. whitelist with query_id = 0 -> rejected', async () => {
-            const newMaster = await blockchain.treasury('newMaster');
-            const newWallet = await blockchain.treasury('newWallet');
-            const res = await factory.send(
-                treasury.getSender(),
-                { value: toNano('0.5') },
-                {
-                    $$type: 'SetJettonWallet',
-                    query_id: 0n,
-                    jetton_master: newMaster.address,
-                    jetton_wallet: newWallet.address,
-                },
-            );
-            expect(res.transactions).toHaveTransaction({
-                from: treasury.address,
-                to: factory.address,
-                success: false,
+        it('4. whitelist with qid=0 -> rejected', async () => {
+            const m = await blockchain.treasury('m');
+            const w = await blockchain.treasury('w');
+            const res = await factory.send(treasury.getSender(), { value: toNano('0.5') }, {
+                $$type: 'SetJettonWallet',
+                query_id: 0n,
+                jetton_master: m.address,
+                jetton_wallet: w.address,
             });
+            expect(res.transactions).toHaveTransaction({ from: treasury.address, to: factory.address, success: false });
         });
 
         it('5. whitelist overwrite with different wallet -> rejected', async () => {
-            const otherWallet = await blockchain.treasury('otherWallet');
-            const res = await factory.send(
-                treasury.getSender(),
-                { value: toNano('0.5') },
-                {
-                    $$type: 'SetJettonWallet',
-                    query_id: 2n,
-                    jetton_master: jettonMaster.address,
-                    jetton_wallet: otherWallet.address,
-                },
-            );
-            expect(res.transactions).toHaveTransaction({
-                from: treasury.address,
-                to: factory.address,
-                success: false,
+            const other = await blockchain.treasury('other');
+            const res = await factory.send(treasury.getSender(), { value: toNano('0.5') }, {
+                $$type: 'SetJettonWallet',
+                query_id: 2n,
+                jetton_master: jettonMaster.address,
+                jetton_wallet: other.address,
             });
+            expect(res.transactions).toHaveTransaction({ from: treasury.address, to: factory.address, success: false });
         });
 
-        it('6. whitelist idempotent (same wallet again) -> ok', async () => {
-            const res = await factory.send(
-                treasury.getSender(),
-                { value: toNano('0.5') },
-                {
-                    $$type: 'SetJettonWallet',
-                    query_id: 2n,
-                    jetton_master: jettonMaster.address,
-                    jetton_wallet: fakeJettonWallet.address,
-                },
-            );
-            expect(res.transactions).toHaveTransaction({
-                from: treasury.address,
-                to: factory.address,
-                success: true,
+        it('6. whitelist idempotent (same wallet) -> ok', async () => {
+            const res = await factory.send(treasury.getSender(), { value: toNano('0.5') }, {
+                $$type: 'SetJettonWallet',
+                query_id: 2n,
+                jetton_master: jettonMaster.address,
+                jetton_wallet: fakeJettonWallet.address,
             });
+            expect(res.transactions).toHaveTransaction({ from: treasury.address, to: factory.address, success: true });
         });
     });
 
     // ═══════════════════════════════════════════════════════════════════════
-    // Factory: create lock
-    // ═══════════════════════════════════════════════════════════════════════
-
     describe('Factory: create lock', () => {
-        it('7. happy path: creates lock, emits LockCreated + TonFeeCollected', async () => {
+        it('7. happy path creates lock', async () => {
             const unlockAt = BigInt(blockchain.now! + 3600);
-            const res = await factory.send(
-                fakeJettonWallet.getSender(),
-                { value: ATTACH_TON },
-                makeJettonNotification(
-                    1n,
-                    JETTON_AMOUNT,
-                    user.address,
-                    makeLockPayload(1n, jettonMaster.address, beneficiary.address, unlockAt),
-                ),
-            );
-            expect(res.transactions).toHaveTransaction({
-                from: fakeJettonWallet.address,
-                to: factory.address,
-                success: true,
-            });
+            const res = await sendCreateLock(unlockAt);
+            expect(res.transactions).toHaveTransaction({ from: fakeJettonWallet.address, to: factory.address, success: true });
             expect(await factory.getNextLockId()).toEqual(2n);
             expect(await factory.getFeeOf(jettonMaster.address)).toEqual(FEE_JETTON);
             expect(await factory.getTonFees()).toEqual(FEE_TON);
         });
 
-        it('8. inline payload too short -> guard refunds, no exit 9', async () => {
-            const tooShort = beginCell()
-                .storeBit(0)
-                .storeUint(0x1, 32)
-                .storeUint(1n, 64)
-                .endCell()
-                .asSlice();
-            const res = await factory.send(
-                fakeJettonWallet.getSender(),
-                { value: ATTACH_TON },
-                makeJettonNotification(1n, JETTON_AMOUNT, user.address, tooShort),
-            );
-            expect(res.transactions).toHaveTransaction({
-                from: fakeJettonWallet.address,
-                to: factory.address,
-                success: true,
-            });
-            expect(await factory.getTonFees()).toEqual(0n);
-            expect(await factory.getNextLockId()).toEqual(1n);
-        });
-
-        it('9. unknown sender (not whitelisted) -> rejected', async () => {
+        it('8. unknown sender -> rejected', async () => {
             const unlockAt = BigInt(blockchain.now! + 3600);
-            const res = await factory.send(
-                attacker.getSender(),
-                { value: ATTACH_TON },
-                makeJettonNotification(
-                    1n,
-                    JETTON_AMOUNT,
-                    user.address,
-                    makeLockPayload(1n, jettonMaster.address, beneficiary.address, unlockAt),
-                ),
-            );
-            expect(res.transactions).toHaveTransaction({
-                from: attacker.address,
-                to: factory.address,
-                success: false,
-            });
+            const payload = makeLockPayload(1n, jettonMaster.address, beneficiary.address, unlockAt);
+            const res = await factory.send(attacker.getSender(), { value: ATTACH_TON },
+                makeJettonNotify(1n, JETTON_AMOUNT, user.address, payload));
+            expect(res.transactions).toHaveTransaction({ from: attacker.address, to: factory.address, success: false });
         });
 
-        it('10. jm mismatch in payload -> rejected', async () => {
-            const otherMaster = await blockchain.treasury('otherMaster');
+        it('9. jm mismatch -> rejected', async () => {
+            const other = await blockchain.treasury('other');
             const unlockAt = BigInt(blockchain.now! + 3600);
-            const res = await factory.send(
-                fakeJettonWallet.getSender(),
-                { value: ATTACH_TON },
-                makeJettonNotification(
-                    1n,
-                    JETTON_AMOUNT,
-                    user.address,
-                    makeLockPayload(1n, otherMaster.address, beneficiary.address, unlockAt),
-                ),
-            );
-            expect(res.transactions).toHaveTransaction({
-                from: fakeJettonWallet.address,
-                to: factory.address,
-                success: false,
-            });
+            const payload = makeLockPayload(1n, other.address, beneficiary.address, unlockAt);
+            const res = await factory.send(fakeJettonWallet.getSender(), { value: ATTACH_TON },
+                makeJettonNotify(1n, JETTON_AMOUNT, user.address, payload));
+            expect(res.transactions).toHaveTransaction({ from: fakeJettonWallet.address, to: factory.address, success: false });
         });
 
-        it('11. unlock_at in the past -> rejected', async () => {
+        it('10. unlock_at in past -> rejected', async () => {
             const unlockAt = BigInt(blockchain.now! - 100);
-            const res = await factory.send(
-                fakeJettonWallet.getSender(),
-                { value: ATTACH_TON },
-                makeJettonNotification(
-                    1n,
-                    JETTON_AMOUNT,
-                    user.address,
-                    makeLockPayload(1n, jettonMaster.address, beneficiary.address, unlockAt),
-                ),
-            );
-            expect(res.transactions).toHaveTransaction({
-                from: fakeJettonWallet.address,
-                to: factory.address,
-                success: false,
-            });
+            const res = await sendCreateLock(unlockAt);
+            expect(res.transactions).toHaveTransaction({ from: fakeJettonWallet.address, to: factory.address, success: false });
         });
 
-        it('12. unlock_at > 10 years -> rejected', async () => {
+        it('11. unlock_at > 10 years -> rejected', async () => {
             const unlockAt = BigInt(blockchain.now! + 315360001);
-            const res = await factory.send(
-                fakeJettonWallet.getSender(),
-                { value: ATTACH_TON },
-                makeJettonNotification(
-                    1n,
-                    JETTON_AMOUNT,
-                    user.address,
-                    makeLockPayload(1n, jettonMaster.address, beneficiary.address, unlockAt),
-                ),
-            );
-            expect(res.transactions).toHaveTransaction({
-                from: fakeJettonWallet.address,
-                to: factory.address,
-                success: false,
-            });
+            const res = await sendCreateLock(unlockAt);
+            expect(res.transactions).toHaveTransaction({ from: fakeJettonWallet.address, to: factory.address, success: false });
         });
 
-        it('13. qid = 0 in payload -> rejected', async () => {
+        it('12. qid = 0 -> rejected', async () => {
             const unlockAt = BigInt(blockchain.now! + 3600);
-            const res = await factory.send(
-                fakeJettonWallet.getSender(),
-                { value: ATTACH_TON },
-                makeJettonNotification(
-                    0n,
-                    JETTON_AMOUNT,
-                    user.address,
-                    makeLockPayload(0n, jettonMaster.address, beneficiary.address, unlockAt),
-                ),
-            );
-            expect(res.transactions).toHaveTransaction({
-                from: fakeJettonWallet.address,
-                to: factory.address,
-                success: false,
-            });
+            const res = await sendCreateLock(unlockAt, 0n);
+            expect(res.transactions).toHaveTransaction({ from: fakeJettonWallet.address, to: factory.address, success: false });
         });
 
-        it('14. insufficient TON attach -> rejected', async () => {
+        it('13. insufficient TON -> rejected', async () => {
             const unlockAt = BigInt(blockchain.now! + 3600);
-            const res = await factory.send(
-                fakeJettonWallet.getSender(),
-                { value: toNano('0.5') },
-                makeJettonNotification(
-                    1n,
-                    JETTON_AMOUNT,
-                    user.address,
-                    makeLockPayload(1n, jettonMaster.address, beneficiary.address, unlockAt),
-                ),
-            );
-            expect(res.transactions).toHaveTransaction({
-                from: fakeJettonWallet.address,
-                to: factory.address,
-                success: false,
-            });
+            const payload = makeLockPayload(1n, jettonMaster.address, beneficiary.address, unlockAt);
+            const res = await factory.send(fakeJettonWallet.getSender(), { value: toNano('0.5') },
+                makeJettonNotify(1n, JETTON_AMOUNT, user.address, payload));
+            expect(res.transactions).toHaveTransaction({ from: fakeJettonWallet.address, to: factory.address, success: false });
         });
 
-        it('15. lock_amount <= 0 (dust amount) -> rejected', async () => {
-            const unlockAt = BigInt(blockchain.now! + 3600);
-            const res = await factory.send(
-                fakeJettonWallet.getSender(),
-                { value: ATTACH_TON },
-                makeJettonNotification(
-                    1n,
-                    1n, // tiny amount, fee rounds to 0, lock = 1 - 0 = 1 > 0 actually
-                    user.address,
-                    makeLockPayload(1n, jettonMaster.address, beneficiary.address, unlockAt),
-                ),
-            );
-            // Actually 1 jetton - 0 fee = 1 > 0 so this passes. But let's send 0.
+        it('14. malformed payload -> LockCreationFailed, next_id unchanged', async () => {
+            const bad = beginCell().storeBit(0).storeUint(0xbad, 32).endCell();
+            const res = await factory.send(fakeJettonWallet.getSender(), { value: ATTACH_TON },
+                makeJettonNotify(1n, JETTON_AMOUNT, user.address, bad));
+            expect(res.transactions).toHaveTransaction({ from: fakeJettonWallet.address, to: factory.address, success: true });
+            expect(await factory.getNextLockId()).toEqual(1n);
+            expect(await factory.getTonFees()).toEqual(0n);
         });
 
-        it('15b. zero jetton amount -> rejected', async () => {
+        it('15. overpay refunded to creator', async () => {
             const unlockAt = BigInt(blockchain.now! + 3600);
-            const res = await factory.send(
-                fakeJettonWallet.getSender(),
-                { value: ATTACH_TON },
-                makeJettonNotification(
-                    1n,
-                    0n,
-                    user.address,
-                    makeLockPayload(1n, jettonMaster.address, beneficiary.address, unlockAt),
-                ),
-            );
-            expect(res.transactions).toHaveTransaction({
-                from: fakeJettonWallet.address,
-                to: factory.address,
-                success: false,
-            });
-        });
-
-        it('16. overpay is refunded to original owner', async () => {
-            const unlockAt = BigInt(blockchain.now! + 3600);
-            const res = await factory.send(
-                fakeJettonWallet.getSender(),
-                { value: toNano('3') },
-                makeJettonNotification(
-                    1n,
-                    JETTON_AMOUNT,
-                    user.address,
-                    makeLockPayload(1n, jettonMaster.address, beneficiary.address, unlockAt),
-                ),
-            );
-            // Should have a tx from factory to user (overpay refund)
-            expect(res.transactions).toHaveTransaction({
-                from: factory.address,
-                to: user.address,
-                success: true,
-            });
+            const payload = makeLockPayload(1n, jettonMaster.address, beneficiary.address, unlockAt);
+            const res = await factory.send(fakeJettonWallet.getSender(), { value: toNano('3') },
+                makeJettonNotify(1n, JETTON_AMOUNT, user.address, payload));
+            expect(res.transactions).toHaveTransaction({ from: factory.address, to: user.address, success: true });
             expect(await factory.getTonFees()).toEqual(FEE_TON);
         });
 
-        it('17. multiple locks increment next_id', async () => {
+        it('16. multiple locks increment next_id', async () => {
             const unlockAt = BigInt(blockchain.now! + 3600);
             for (let i = 0; i < 3; i++) {
-                await factory.send(
-                    fakeJettonWallet.getSender(),
-                    { value: ATTACH_TON },
-                    makeJettonNotification(
-                        BigInt(i + 1),
-                        JETTON_AMOUNT,
-                        user.address,
-                        makeLockPayload(BigInt(i + 1), jettonMaster.address, beneficiary.address, unlockAt),
-                    ),
-                );
+                await sendCreateLock(unlockAt, BigInt(i + 1));
             }
             expect(await factory.getNextLockId()).toEqual(4n);
         });
     });
 
     // ═══════════════════════════════════════════════════════════════════════
-    // Wallet: funding
-    // ═══════════════════════════════════════════════════════════════════════
-
-    describe('Wallet: funding', () => {
-        it('18. correct amount marks funded and emits LockFunded', async () => {
-            const unlockAt = BigInt(blockchain.now! + 3600);
-            const wallet = await createLock(unlockAt);
-            const res = await fundWallet(wallet);
-            expect(res.transactions).toHaveTransaction({
-                from: fakeJettonWallet.address,
-                to: wallet.address,
-                success: true,
-            });
-            expect(await wallet.getIsFunded()).toEqual(true);
+    describe('Factory: TakeWalletAddress', () => {
+        it('17. qid without HIGH_BIT -> silently ignored', async () => {
+            const res = await factory.send(jettonMaster.getSender(), { value: toNano('0.1') },
+                makeTakeWalletAddress(1n, attacker.address, attacker.address));
+            expect(res.transactions).toHaveTransaction({ from: jettonMaster.address, to: factory.address, success: true });
         });
 
-        it('19. deposit from non-jetton-wallet -> rejected', async () => {
+        it('18. wrong master -> rejected', async () => {
             const unlockAt = BigInt(blockchain.now! + 3600);
-            const wallet = await createLock(unlockAt);
-            const res = await wallet.send(
-                attacker.getSender(),
-                { value: toNano('0.1') },
-                {
-                    $$type: 'JettonNotification',
-                    query_id: 2n,
-                    amount: LOCK_AMOUNT,
-                    sender: user.address,
-                    forward_payload: beginCell().endCell().asSlice(),
-                },
-            );
-            expect(res.transactions).toHaveTransaction({
-                from: attacker.address,
-                to: wallet.address,
-                success: false,
-            });
-        });
-
-        it('20. wrong amount does NOT mark funded (emits UnexpectedDeposit)', async () => {
-            const unlockAt = BigInt(blockchain.now! + 3600);
-            const wallet = await createLock(unlockAt);
-            await fundWallet(wallet, fakeJettonWallet, LOCK_AMOUNT - 1n);
-            expect(await wallet.getIsFunded()).toEqual(false);
-        });
-
-        it('21. second deposit (extra) does NOT change funded', async () => {
-            const unlockAt = BigInt(blockchain.now! + 3600);
-            const wallet = await createLock(unlockAt);
-            await fundWallet(wallet, fakeJettonWallet, LOCK_AMOUNT, 2n);
-            const res = await fundWallet(wallet, fakeJettonWallet, 500n, 3n);
-            expect(res.transactions).toHaveTransaction({
-                from: fakeJettonWallet.address,
-                to: wallet.address,
-                success: true,
-            });
-            expect(await wallet.getIsFunded()).toEqual(true);
+            await sendCreateLock(unlockAt);
+            const childAddr = await factory.getPendingCreateOf(1n);
+            const res = await factory.send(attacker.getSender(), { value: toNano('0.1') },
+                makeTakeWalletAddress(1n | HIGH_BIT, attacker.address, childAddr!));
+            expect(res.transactions).toHaveTransaction({ from: attacker.address, to: factory.address, success: false });
         });
     });
 
     // ═══════════════════════════════════════════════════════════════════════
-    // Wallet: claim
-    // ═══════════════════════════════════════════════════════════════════════
-
-    describe('Wallet: claim', () => {
-        it('22. claim before unlock_at -> rejected', async () => {
+    describe('Factory: WithdrawFees', () => {
+        it('19. withdraw by treasury -> ok', async () => {
             const unlockAt = BigInt(blockchain.now! + 3600);
-            const wallet = await createLock(unlockAt);
-            await fundWallet(wallet);
-
-            const res = await wallet.send(
-                beneficiary.getSender(),
-                { value: toNano('0.5') },
-                { $$type: 'Claim', query_id: 1n, amount: 0n },
-            );
-            expect(res.transactions).toHaveTransaction({
-                from: beneficiary.address,
-                to: wallet.address,
-                success: false,
+            await sendCreateLock(unlockAt);
+            const res = await factory.send(treasury.getSender(), { value: toNano('0.5') }, {
+                $$type: 'WithdrawFees',
+                query_id: 100n,
+                jetton_master: jettonMaster.address,
+                destination_wallet: treasury.address,
+                amount: FEE_JETTON,
             });
-        });
-
-        it('23. claim after unlock without funding -> rejected', async () => {
-            const unlockAt = BigInt(blockchain.now! + 100);
-            const wallet = await createLock(unlockAt);
-            blockchain.now = Number(unlockAt) + 10;
-
-            const res = await wallet.send(
-                beneficiary.getSender(),
-                { value: toNano('0.5') },
-                { $$type: 'Claim', query_id: 1n, amount: 0n },
-            );
-            expect(res.transactions).toHaveTransaction({
-                from: beneficiary.address,
-                to: wallet.address,
-                success: false,
-            });
-        });
-
-        it('24. happy path: full claim after unlock with funding', async () => {
-            const unlockAt = BigInt(blockchain.now! + 100);
-            const wallet = await createLock(unlockAt);
-            await fundWallet(wallet);
-            blockchain.now = Number(unlockAt) + 10;
-
-            const res = await wallet.send(
-                beneficiary.getSender(),
-                { value: toNano('0.5') },
-                { $$type: 'Claim', query_id: 1n, amount: 0n },
-            );
-            expect(res.transactions).toHaveTransaction({
-                from: beneficiary.address,
-                to: wallet.address,
-                success: true,
-            });
-            expect(res.transactions).toHaveTransaction({
-                from: wallet.address,
-                to: fakeJettonWallet.address,
-                op: 0x0f8a7ea5, // JettonTransfer
-            });
-            expect(await wallet.getClaimedAmount()).toEqual(LOCK_AMOUNT);
-        });
-
-        it('25. partial claim: amount = 100', async () => {
-            const unlockAt = BigInt(blockchain.now! + 100);
-            const wallet = await createLock(unlockAt);
-            await fundWallet(wallet);
-            blockchain.now = Number(unlockAt) + 10;
-
-            await wallet.send(
-                beneficiary.getSender(),
-                { value: toNano('0.5') },
-                { $$type: 'Claim', query_id: 1n, amount: 100n },
-            );
-            expect(await wallet.getClaimedAmount()).toEqual(100n);
-            expect(await wallet.getAvailable()).toEqual(LOCK_AMOUNT - 100n);
-        });
-
-        it('26. claim with amount > available -> rejected', async () => {
-            const unlockAt = BigInt(blockchain.now! + 100);
-            const wallet = await createLock(unlockAt);
-            await fundWallet(wallet);
-            blockchain.now = Number(unlockAt) + 10;
-
-            const res = await wallet.send(
-                beneficiary.getSender(),
-                { value: toNano('0.5') },
-                { $$type: 'Claim', query_id: 1n, amount: LOCK_AMOUNT + 1n },
-            );
-            expect(res.transactions).toHaveTransaction({
-                from: beneficiary.address,
-                to: wallet.address,
-                success: false,
-            });
-        });
-
-        it('27. claim by non-beneficiary -> rejected', async () => {
-            const unlockAt = BigInt(blockchain.now! + 100);
-            const wallet = await createLock(unlockAt);
-            await fundWallet(wallet);
-            blockchain.now = Number(unlockAt) + 10;
-
-            const res = await wallet.send(
-                attacker.getSender(),
-                { value: toNano('0.5') },
-                { $$type: 'Claim', query_id: 1n, amount: 0n },
-            );
-            expect(res.transactions).toHaveTransaction({
-                from: attacker.address,
-                to: wallet.address,
-                success: false,
-            });
-        });
-
-        it('28. claim with query_id = 0 -> rejected', async () => {
-            const unlockAt = BigInt(blockchain.now! + 100);
-            const wallet = await createLock(unlockAt);
-            await fundWallet(wallet);
-            blockchain.now = Number(unlockAt) + 10;
-
-            const res = await wallet.send(
-                beneficiary.getSender(),
-                { value: toNano('0.5') },
-                { $$type: 'Claim', query_id: 0n, amount: 0n },
-            );
-            expect(res.transactions).toHaveTransaction({
-                from: beneficiary.address,
-                to: wallet.address,
-                success: false,
-            });
-        });
-
-        it('29. second claim while first pending -> rejected', async () => {
-            const unlockAt = BigInt(blockchain.now! + 100);
-            const wallet = await createLock(unlockAt);
-            await fundWallet(wallet);
-            blockchain.now = Number(unlockAt) + 10;
-
-            await wallet.send(
-                beneficiary.getSender(),
-                { value: toNano('0.5') },
-                { $$type: 'Claim', query_id: 1n, amount: 100n },
-            );
-            const res = await wallet.send(
-                beneficiary.getSender(),
-                { value: toNano('0.5') },
-                { $$type: 'Claim', query_id: 2n, amount: 100n },
-            );
-            expect(res.transactions).toHaveTransaction({
-                from: beneficiary.address,
-                to: wallet.address,
-                success: false,
-            });
-        });
-    });
-
-    // ═══════════════════════════════════════════════════════════════════════
-    // Wallet: extend
-    // ═══════════════════════════════════════════════════════════════════════
-
-    describe('Wallet: extend', () => {
-        it('30. creator extends forward -> ok', async () => {
-            const unlockAt = BigInt(blockchain.now! + 3600);
-            const wallet = await createLock(unlockAt);
-            const newUnlock = unlockAt + 7200n;
-
-            const res = await wallet.send(
-                user.getSender(),
-                { value: toNano('0.5') },
-                { $$type: 'Extend', query_id: 1n, new_unlock_at: newUnlock },
-            );
-            expect(res.transactions).toHaveTransaction({
-                from: user.address,
-                to: wallet.address,
-                success: true,
-            });
-            expect(await wallet.getUnlockAt()).toEqual(newUnlock);
-        });
-
-        it('31. extend backwards -> rejected', async () => {
-            const unlockAt = BigInt(blockchain.now! + 7200);
-            const wallet = await createLock(unlockAt);
-            const res = await wallet.send(
-                user.getSender(),
-                { value: toNano('0.5') },
-                { $$type: 'Extend', query_id: 1n, new_unlock_at: unlockAt - 1800n },
-            );
-            expect(res.transactions).toHaveTransaction({
-                from: user.address,
-                to: wallet.address,
-                success: false,
-            });
-        });
-
-        it('32. extend by non-creator -> rejected', async () => {
-            const unlockAt = BigInt(blockchain.now! + 3600);
-            const wallet = await createLock(unlockAt);
-            const res = await wallet.send(
-                attacker.getSender(),
-                { value: toNano('0.5') },
-                { $$type: 'Extend', query_id: 1n, new_unlock_at: unlockAt + 3600n },
-            );
-            expect(res.transactions).toHaveTransaction({
-                from: attacker.address,
-                to: wallet.address,
-                success: false,
-            });
-        });
-
-        it('33. extend after unlock -> rejected', async () => {
-            const unlockAt = BigInt(blockchain.now! + 100);
-            const wallet = await createLock(unlockAt);
-            blockchain.now = Number(unlockAt) + 10;
-
-            const res = await wallet.send(
-                user.getSender(),
-                { value: toNano('0.5') },
-                { $$type: 'Extend', query_id: 1n, new_unlock_at: unlockAt + 7200n },
-            );
-            expect(res.transactions).toHaveTransaction({
-                from: user.address,
-                to: wallet.address,
-                success: false,
-            });
-        });
-
-        it('34. extend beyond 10 years -> rejected', async () => {
-            const unlockAt = BigInt(blockchain.now! + 3600);
-            const wallet = await createLock(unlockAt);
-            const tooFar = BigInt(blockchain.now! + 315360001);
-            const res = await wallet.send(
-                user.getSender(),
-                { value: toNano('0.5') },
-                { $$type: 'Extend', query_id: 1n, new_unlock_at: tooFar },
-            );
-            expect(res.transactions).toHaveTransaction({
-                from: user.address,
-                to: wallet.address,
-                success: false,
-            });
-        });
-    });
-
-    // ═══════════════════════════════════════════════════════════════════════
-    // Wallet: reset pending claim
-    // ═══════════════════════════════════════════════════════════════════════
-
-    describe('Wallet: reset pending', () => {
-        it('35. reset by beneficiary after timeout -> ok, does not roll back claimed', async () => {
-            const unlockAt = BigInt(blockchain.now! + 100);
-            const wallet = await createLock(unlockAt);
-            await fundWallet(wallet);
-            blockchain.now = Number(unlockAt) + 10;
-
-            await wallet.send(
-                beneficiary.getSender(),
-                { value: toNano('0.5') },
-                { $$type: 'Claim', query_id: 1n, amount: 100n },
-            );
-            expect(await wallet.getIsPending()).toEqual(true);
-
-            // fast-forward 6h + 1
-            blockchain.now = (blockchain.now as number) + 21601;
-
-            const res = await wallet.send(
-                beneficiary.getSender(),
-                { value: toNano('0.5') },
-                { $$type: 'ResetPendingClaim', query_id: 0n },
-            );
-            expect(res.transactions).toHaveTransaction({
-                from: beneficiary.address,
-                to: wallet.address,
-                success: true,
-            });
-            // CRITICAL: claimed is NOT rolled back
-            expect(await wallet.getClaimedAmount()).toEqual(100n);
-            expect(await wallet.getIsPending()).toEqual(false);
-        });
-
-        it('36. reset by non-beneficiary -> rejected', async () => {
-            const unlockAt = BigInt(blockchain.now! + 100);
-            const wallet = await createLock(unlockAt);
-            await fundWallet(wallet);
-            blockchain.now = Number(unlockAt) + 10;
-
-            await wallet.send(
-                beneficiary.getSender(),
-                { value: toNano('0.5') },
-                { $$type: 'Claim', query_id: 1n, amount: 100n },
-            );
-            blockchain.now = (blockchain.now as number) + 21601;
-
-            const res = await wallet.send(
-                attacker.getSender(),
-                { value: toNano('0.5') },
-                { $$type: 'ResetPendingClaim', query_id: 0n },
-            );
-            expect(res.transactions).toHaveTransaction({
-                from: attacker.address,
-                to: wallet.address,
-                success: false,
-            });
-        });
-
-        it('37. reset before timeout -> rejected', async () => {
-            const unlockAt = BigInt(blockchain.now! + 100);
-            const wallet = await createLock(unlockAt);
-            await fundWallet(wallet);
-            blockchain.now = Number(unlockAt) + 10;
-
-            await wallet.send(
-                beneficiary.getSender(),
-                { value: toNano('0.5') },
-                { $$type: 'Claim', query_id: 1n, amount: 100n },
-            );
-            // no time forward
-            const res = await wallet.send(
-                beneficiary.getSender(),
-                { value: toNano('0.5') },
-                { $$type: 'ResetPendingClaim', query_id: 0n },
-            );
-            expect(res.transactions).toHaveTransaction({
-                from: beneficiary.address,
-                to: wallet.address,
-                success: false,
-            });
-        });
-
-        it('38. reset when no pending -> rejected', async () => {
-            const unlockAt = BigInt(blockchain.now! + 100);
-            const wallet = await createLock(unlockAt);
-            await fundWallet(wallet);
-            blockchain.now = Number(unlockAt) + 10;
-
-            const res = await wallet.send(
-                beneficiary.getSender(),
-                { value: toNano('0.5') },
-                { $$type: 'ResetPendingClaim', query_id: 0n },
-            );
-            expect(res.transactions).toHaveTransaction({
-                from: beneficiary.address,
-                to: wallet.address,
-                success: false,
-            });
-        });
-    });
-
-    // ═══════════════════════════════════════════════════════════════════════
-    // Factory: withdraw fees
-    // ═══════════════════════════════════════════════════════════════════════
-
-    describe('Factory: withdraw jetton fees', () => {
-        it('39. withdraw by treasury -> ok', async () => {
-            const unlockAt = BigInt(blockchain.now! + 3600);
-            await createLock(unlockAt);
-            expect(await factory.getFeeOf(jettonMaster.address)).toEqual(FEE_JETTON);
-
-            const res = await factory.send(
-                treasury.getSender(),
-                { value: toNano('0.5') },
-                {
-                    $$type: 'WithdrawFees',
-                    query_id: 100n,
-                    jetton_master: jettonMaster.address,
-                    destination_wallet: treasury.address,
-                    amount: FEE_JETTON,
-                },
-            );
-            expect(res.transactions).toHaveTransaction({
-                from: treasury.address,
-                to: factory.address,
-                success: true,
-            });
+            expect(res.transactions).toHaveTransaction({ from: treasury.address, to: factory.address, success: true });
             expect(await factory.getFeeOf(jettonMaster.address)).toEqual(0n);
         });
 
-        it('40. withdraw by non-treasury -> rejected', async () => {
+        it('20. withdraw by non-treasury -> rejected', async () => {
             const unlockAt = BigInt(blockchain.now! + 3600);
-            await createLock(unlockAt);
-
-            const res = await factory.send(
-                attacker.getSender(),
-                { value: toNano('0.5') },
-                {
-                    $$type: 'WithdrawFees',
-                    query_id: 100n,
-                    jetton_master: jettonMaster.address,
-                    destination_wallet: attacker.address,
-                    amount: FEE_JETTON,
-                },
-            );
-            expect(res.transactions).toHaveTransaction({
-                from: attacker.address,
-                to: factory.address,
-                success: false,
+            await sendCreateLock(unlockAt);
+            const res = await factory.send(attacker.getSender(), { value: toNano('0.5') }, {
+                $$type: 'WithdrawFees',
+                query_id: 100n,
+                jetton_master: jettonMaster.address,
+                destination_wallet: attacker.address,
+                amount: FEE_JETTON,
             });
+            expect(res.transactions).toHaveTransaction({ from: attacker.address, to: factory.address, success: false });
         });
 
-        it('41. withdraw more than available -> rejected', async () => {
+        it('21. withdraw more than available -> rejected', async () => {
             const unlockAt = BigInt(blockchain.now! + 3600);
-            await createLock(unlockAt);
-
-            const res = await factory.send(
-                treasury.getSender(),
-                { value: toNano('0.5') },
-                {
-                    $$type: 'WithdrawFees',
-                    query_id: 100n,
-                    jetton_master: jettonMaster.address,
-                    destination_wallet: treasury.address,
-                    amount: FEE_JETTON + 1n,
-                },
-            );
-            expect(res.transactions).toHaveTransaction({
-                from: treasury.address,
-                to: factory.address,
-                success: false,
+            await sendCreateLock(unlockAt);
+            const res = await factory.send(treasury.getSender(), { value: toNano('0.5') }, {
+                $$type: 'WithdrawFees',
+                query_id: 100n,
+                jetton_master: jettonMaster.address,
+                destination_wallet: treasury.address,
+                amount: FEE_JETTON + 1n,
             });
+            expect(res.transactions).toHaveTransaction({ from: treasury.address, to: factory.address, success: false });
         });
 
-        it('42. withdraw with qid = 0 -> rejected', async () => {
+        it('22. qid reuse -> rejected', async () => {
             const unlockAt = BigInt(blockchain.now! + 3600);
-            await createLock(unlockAt);
-
-            const res = await factory.send(
-                treasury.getSender(),
-                { value: toNano('0.5') },
-                {
-                    $$type: 'WithdrawFees',
-                    query_id: 0n,
-                    jetton_master: jettonMaster.address,
-                    destination_wallet: treasury.address,
-                    amount: FEE_JETTON,
-                },
-            );
-            expect(res.transactions).toHaveTransaction({
-                from: treasury.address,
-                to: factory.address,
-                success: false,
+            await sendCreateLock(unlockAt);
+            await factory.send(treasury.getSender(), { value: toNano('0.5') }, {
+                $$type: 'WithdrawFees', query_id: 100n,
+                jetton_master: jettonMaster.address,
+                destination_wallet: treasury.address, amount: FEE_JETTON,
             });
+            const res = await factory.send(treasury.getSender(), { value: toNano('0.5') }, {
+                $$type: 'WithdrawFees', query_id: 100n,
+                jetton_master: jettonMaster.address,
+                destination_wallet: treasury.address, amount: 1n,
+            });
+            expect(res.transactions).toHaveTransaction({ from: treasury.address, to: factory.address, success: false });
         });
 
-        it('43. reuse same qid -> rejected', async () => {
+        it('23. zero amount -> rejected', async () => {
             const unlockAt = BigInt(blockchain.now! + 3600);
-            await createLock(unlockAt);
-
-            await factory.send(
-                treasury.getSender(),
-                { value: toNano('0.5') },
-                {
-                    $$type: 'WithdrawFees',
-                    query_id: 100n,
-                    jetton_master: jettonMaster.address,
-                    destination_wallet: treasury.address,
-                    amount: FEE_JETTON,
-                },
-            );
-
-            // second call with same qid — even after fees are 0, should fail on reuse
-            const res = await factory.send(
-                treasury.getSender(),
-                { value: toNano('0.5') },
-                {
-                    $$type: 'WithdrawFees',
-                    query_id: 100n,
-                    jetton_master: jettonMaster.address,
-                    destination_wallet: treasury.address,
-                    amount: 1n,
-                },
-            );
-            expect(res.transactions).toHaveTransaction({
-                from: treasury.address,
-                to: factory.address,
-                success: false,
+            await sendCreateLock(unlockAt);
+            const res = await factory.send(treasury.getSender(), { value: toNano('0.5') }, {
+                $$type: 'WithdrawFees', query_id: 100n,
+                jetton_master: jettonMaster.address,
+                destination_wallet: treasury.address, amount: 0n,
             });
-        });
-
-        it('44. zero amount -> rejected', async () => {
-            const unlockAt = BigInt(blockchain.now! + 3600);
-            await createLock(unlockAt);
-
-            const res = await factory.send(
-                treasury.getSender(),
-                { value: toNano('0.5') },
-                {
-                    $$type: 'WithdrawFees',
-                    query_id: 100n,
-                    jetton_master: jettonMaster.address,
-                    destination_wallet: treasury.address,
-                    amount: 0n,
-                },
-            );
-            expect(res.transactions).toHaveTransaction({
-                from: treasury.address,
-                to: factory.address,
-                success: false,
-            });
+            expect(res.transactions).toHaveTransaction({ from: treasury.address, to: factory.address, success: false });
         });
     });
 
     // ═══════════════════════════════════════════════════════════════════════
-    // Factory: withdraw TON fees
-    // ═══════════════════════════════════════════════════════════════════════
-
-    describe('Factory: withdraw TON fees', () => {
-        it('45. withdraw by treasury -> ok', async () => {
+    describe('Factory: WithdrawTonFees', () => {
+        it('24. withdraw by treasury -> ok', async () => {
             const unlockAt = BigInt(blockchain.now! + 3600);
-            await createLock(unlockAt);
-            expect(await factory.getTonFees()).toEqual(FEE_TON);
-
-            const res = await factory.send(
-                treasury.getSender(),
-                { value: toNano('0.2') },
-                {
-                    $$type: 'WithdrawTonFees',
-                    query_id: 200n,
-                    amount: FEE_TON,
-                    destination: treasury.address,
-                },
-            );
-            expect(res.transactions).toHaveTransaction({
-                from: factory.address,
-                to: treasury.address,
-                success: true,
+            await sendCreateLock(unlockAt);
+            const res = await factory.send(treasury.getSender(), { value: toNano('0.2') }, {
+                $$type: 'WithdrawTonFees', query_id: 200n,
+                amount: FEE_TON, destination: treasury.address,
             });
+            expect(res.transactions).toHaveTransaction({ from: factory.address, to: treasury.address, success: true });
             expect(await factory.getTonFees()).toEqual(0n);
         });
 
-        it('46. withdraw by non-treasury -> rejected', async () => {
+        it('25. withdraw by non-treasury -> rejected', async () => {
             const unlockAt = BigInt(blockchain.now! + 3600);
-            await createLock(unlockAt);
-
-            const res = await factory.send(
-                attacker.getSender(),
-                { value: toNano('0.2') },
-                {
-                    $$type: 'WithdrawTonFees',
-                    query_id: 200n,
-                    amount: FEE_TON,
-                    destination: attacker.address,
-                },
-            );
-            expect(res.transactions).toHaveTransaction({
-                from: attacker.address,
-                to: factory.address,
-                success: false,
+            await sendCreateLock(unlockAt);
+            const res = await factory.send(attacker.getSender(), { value: toNano('0.2') }, {
+                $$type: 'WithdrawTonFees', query_id: 200n,
+                amount: FEE_TON, destination: attacker.address,
             });
+            expect(res.transactions).toHaveTransaction({ from: attacker.address, to: factory.address, success: false });
         });
 
-        it('47. withdraw more than available -> rejected', async () => {
+        it('26. more than available -> rejected', async () => {
             const unlockAt = BigInt(blockchain.now! + 3600);
-            await createLock(unlockAt);
-
-            const res = await factory.send(
-                treasury.getSender(),
-                { value: toNano('0.2') },
-                {
-                    $$type: 'WithdrawTonFees',
-                    query_id: 200n,
-                    amount: FEE_TON + toNano('1'),
-                    destination: treasury.address,
-                },
-            );
-            expect(res.transactions).toHaveTransaction({
-                from: treasury.address,
-                to: factory.address,
-                success: false,
+            await sendCreateLock(unlockAt);
+            const res = await factory.send(treasury.getSender(), { value: toNano('0.2') }, {
+                $$type: 'WithdrawTonFees', query_id: 200n,
+                amount: FEE_TON + toNano('1'), destination: treasury.address,
             });
+            expect(res.transactions).toHaveTransaction({ from: treasury.address, to: factory.address, success: false });
         });
 
-        it('48. reuse same qid -> rejected', async () => {
+        it('27. qid reuse -> rejected', async () => {
             const unlockAt = BigInt(blockchain.now! + 3600);
-            await createLock(unlockAt);
-
-            await factory.send(
-                treasury.getSender(),
-                { value: toNano('0.2') },
-                {
-                    $$type: 'WithdrawTonFees',
-                    query_id: 200n,
-                    amount: FEE_TON,
-                    destination: treasury.address,
-                },
-            );
-
-            const res = await factory.send(
-                treasury.getSender(),
-                { value: toNano('0.2') },
-                {
-                    $$type: 'WithdrawTonFees',
-                    query_id: 200n,
-                    amount: 1n,
-                    destination: treasury.address,
-                },
-            );
-            expect(res.transactions).toHaveTransaction({
-                from: treasury.address,
-                to: factory.address,
-                success: false,
+            await sendCreateLock(unlockAt);
+            await factory.send(treasury.getSender(), { value: toNano('0.2') }, {
+                $$type: 'WithdrawTonFees', query_id: 200n,
+                amount: FEE_TON, destination: treasury.address,
             });
+            const res = await factory.send(treasury.getSender(), { value: toNano('0.2') }, {
+                $$type: 'WithdrawTonFees', query_id: 200n,
+                amount: 1n, destination: treasury.address,
+            });
+            expect(res.transactions).toHaveTransaction({ from: treasury.address, to: factory.address, success: false });
         });
     });
 
     // ═══════════════════════════════════════════════════════════════════════
-    // Factory: bounce of create-transfer -> refund
-    // ═══════════════════════════════════════════════════════════════════════
-
-    describe('Factory: bounce handling', () => {
-        it('49. create-transfer bounce: refund + LockCreationFailed (simulated)', async () => {
-            // NOTE: simulating bounce in sandbox requires the destination
-            // contract to actually bounce. Since LockupWallet doesn't bounce
-            // on JettonNotification, we cannot easily trigger this path in
-            // the sandbox without a full jetton implementation. This test is a
-            // placeholder documenting the intended behaviour.
-            expect(true).toBe(true);
+    describe('Factory: Rescue', () => {
+        it('28. RescueTon by treasury -> ok', async () => {
+            const res = await factory.send(treasury.getSender(), { value: toNano('0.2') }, {
+                $$type: 'RescueTon', query_id: 300n,
+                amount: toNano('1'), destination: treasury.address,
+            });
+            expect(res.transactions).toHaveTransaction({ from: factory.address, to: treasury.address, success: true });
         });
 
-        it('50. whitelist registers correct reverse mapping', async () => {
-            expect(await factory.getMasterOf(fakeJettonWallet.address)).toEqualAddress(
-                jettonMaster.address,
-            );
-            expect(await factory.getWalletOf(jettonMaster.address)).toEqualAddress(
-                fakeJettonWallet.address,
-            );
+        it('29. RescueTon by non-treasury -> rejected', async () => {
+            const res = await factory.send(attacker.getSender(), { value: toNano('0.2') }, {
+                $$type: 'RescueTon', query_id: 300n,
+                amount: toNano('1'), destination: attacker.address,
+            });
+            expect(res.transactions).toHaveTransaction({ from: attacker.address, to: factory.address, success: false });
+        });
+
+        it('30. RescueJetton by treasury -> ok', async () => {
+            const res = await factory.send(treasury.getSender(), { value: toNano('0.5') }, {
+                $$type: 'RescueJetton', query_id: 301n,
+                jetton_master: jettonMaster.address,
+                amount: 100n, destination: treasury.address,
+            });
+            expect(res.transactions).toHaveTransaction({ from: treasury.address, to: factory.address, success: true });
+        });
+
+        it('31. RescueJetton qid reuse -> rejected', async () => {
+            await factory.send(treasury.getSender(), { value: toNano('0.5') }, {
+                $$type: 'RescueJetton', query_id: 301n,
+                jetton_master: jettonMaster.address,
+                amount: 100n, destination: treasury.address,
+            });
+            const res = await factory.send(treasury.getSender(), { value: toNano('0.5') }, {
+                $$type: 'RescueJetton', query_id: 301n,
+                jetton_master: jettonMaster.address,
+                amount: 100n, destination: treasury.address,
+            });
+            expect(res.transactions).toHaveTransaction({ from: treasury.address, to: factory.address, success: false });
         });
     });
 
     // ═══════════════════════════════════════════════════════════════════════
-    // Getter sanity
+    describe('Factory: fee management', () => {
+        it('32. SetFeeBps by treasury -> ok', async () => {
+            const res = await factory.send(treasury.getSender(), { value: toNano('0.2') }, {
+                $$type: 'SetFeeBps', query_id: 400n, fee_bps: 100n,
+            });
+            expect(res.transactions).toHaveTransaction({ from: treasury.address, to: factory.address, success: true });
+            expect(await factory.getFeeBps()).toEqual(100n);
+        });
+
+        it('33. SetFeeBps above 10% -> rejected', async () => {
+            const res = await factory.send(treasury.getSender(), { value: toNano('0.2') }, {
+                $$type: 'SetFeeBps', query_id: 400n, fee_bps: 2000n,
+            });
+            expect(res.transactions).toHaveTransaction({ from: treasury.address, to: factory.address, success: false });
+        });
+
+        it('34. SetFeeBps by non-treasury -> rejected', async () => {
+            const res = await factory.send(attacker.getSender(), { value: toNano('0.2') }, {
+                $$type: 'SetFeeBps', query_id: 400n, fee_bps: 100n,
+            });
+            expect(res.transactions).toHaveTransaction({ from: attacker.address, to: factory.address, success: false });
+        });
+
+        it('35. SetFeeTon by treasury -> ok', async () => {
+            const res = await factory.send(treasury.getSender(), { value: toNano('0.2') }, {
+                $$type: 'SetFeeTon', query_id: 401n, fee_ton: toNano('2'),
+            });
+            expect(res.transactions).toHaveTransaction({ from: treasury.address, to: factory.address, success: true });
+            expect(await factory.getFeeTon()).toEqual(toNano('2'));
+        });
+    });
+
     // ═══════════════════════════════════════════════════════════════════════
+    describe('LockupWallet: direct', () => {
+        let wallet: SandboxContract<LockupWallet>;
 
-    describe('Getters', () => {
-        it('51. wallet getters reflect state', async () => {
-            const unlockAt = BigInt(blockchain.now! + 100);
-            const wallet = await createLock(unlockAt);
-            await fundWallet(wallet);
+        beforeEach(async () => {
+            const unlockAt = BigInt(blockchain.now! + 3600);
+            wallet = blockchain.openContract(
+                await LockupWallet.fromInit(
+                    1n,
+                    factory.address,
+                    jettonMaster.address,
+                    beneficiary.address,
+                    user.address,
+                    LOCK_AMOUNT,
+                    unlockAt,
+                ),
+            );
+            // Fund wallet's gas
+            await wallet.send(treasury.getSender(), { value: toNano('2') }, null);
+        });
 
-            expect(await wallet.getLockId()).toEqual(1n);
-            expect(await wallet.getFactory()).toEqualAddress(factory.address);
-            expect(await wallet.getJettonMaster()).toEqualAddress(jettonMaster.address);
+        it('36. StartDiscovery only from factory', async () => {
+            const res = await wallet.send(attacker.getSender(), { value: toNano('0.2') }, {
+                $$type: 'StartDiscovery', query_id: 1n,
+            });
+            expect(res.transactions).toHaveTransaction({ from: attacker.address, to: wallet.address, success: false });
+        });
+
+        it('37. TakeWalletAddress only from master', async () => {
+            const res = await wallet.send(attacker.getSender(), { value: toNano('0.1') }, 
+                makeTakeWalletAddress(0n, fakeJettonWallet.address, wallet.address));
+            expect(res.transactions).toHaveTransaction({ from: attacker.address, to: wallet.address, success: false });
+        });
+
+        it('38. discovery sets jetton_wallet', async () => {
+            const res = await wallet.send(jettonMaster.getSender(), { value: toNano('0.1') },
+                makeTakeWalletAddress(0n, fakeJettonWallet.address, wallet.address));
+            expect(res.transactions).toHaveTransaction({ from: jettonMaster.address, to: wallet.address, success: true });
             expect(await wallet.getJettonWallet()).toEqualAddress(fakeJettonWallet.address);
-            expect(await wallet.getBeneficiary()).toEqualAddress(beneficiary.address);
-            expect(await wallet.getCreator()).toEqualAddress(user.address);
-            expect(await wallet.getTotalAmount()).toEqual(LOCK_AMOUNT);
-            expect(await wallet.getClaimedAmount()).toEqual(0n);
-            expect(await wallet.getAvailable()).toEqual(LOCK_AMOUNT);
-            expect(await wallet.getUnlockAt()).toEqual(unlockAt);
-            expect(await wallet.getIsFunded()).toEqual(true);
-            expect(await wallet.getIsPending()).toEqual(false);
         });
 
-        it('52. availableClaimable returns 0 before unlock', async () => {
-            const unlockAt = BigInt(blockchain.now! + 3600);
-            const wallet = await createLock(unlockAt);
-            await fundWallet(wallet);
+        it('39. JettonNotification from correct wallet funds', async () => {
+            await wallet.send(jettonMaster.getSender(), { value: toNano('0.1') },
+                makeTakeWalletAddress(0n, fakeJettonWallet.address, wallet.address));
+
+            const res = await wallet.send(fakeJettonWallet.getSender(), { value: toNano('0.1') }, {
+                $$type: 'JettonNotification',
+                query_id: 1n,
+                amount: LOCK_AMOUNT,
+                sender: user.address,
+                forward_payload: beginCell().endCell().asSlice(),
+            });
+            expect(res.transactions).toHaveTransaction({ from: fakeJettonWallet.address, to: wallet.address, success: true });
+            expect(await wallet.getIsFunded()).toEqual(true);
+        });
+
+        it('40. JettonNotification from wrong wallet -> rejected', async () => {
+            await wallet.send(jettonMaster.getSender(), { value: toNano('0.1') },
+                makeTakeWalletAddress(0n, fakeJettonWallet.address, wallet.address));
+
+            const res = await wallet.send(attacker.getSender(), { value: toNano('0.1') }, {
+                $$type: 'JettonNotification',
+                query_id: 1n,
+                amount: LOCK_AMOUNT,
+                sender: user.address,
+                forward_payload: beginCell().endCell().asSlice(),
+            });
+            expect(res.transactions).toHaveTransaction({ from: attacker.address, to: wallet.address, success: false });
+        });
+
+        it('41. Claim before unlock -> rejected', async () => {
+            await wallet.send(jettonMaster.getSender(), { value: toNano('0.1') },
+                makeTakeWalletAddress(0n, fakeJettonWallet.address, wallet.address));
+            await wallet.send(fakeJettonWallet.getSender(), { value: toNano('0.1') }, {
+                $$type: 'JettonNotification',
+                query_id: 1n,
+                amount: LOCK_AMOUNT,
+                sender: user.address,
+                forward_payload: beginCell().endCell().asSlice(),
+            });
+
+            const res = await wallet.send(beneficiary.getSender(), { value: toNano('0.5') }, {
+                $$type: 'Claim', query_id: 1n, amount: 0n,
+            });
+            expect(res.transactions).toHaveTransaction({ from: beneficiary.address, to: wallet.address, success: false });
+        });
+
+        it('42. Claim by non-beneficiary -> rejected', async () => {
+            await wallet.send(jettonMaster.getSender(), { value: toNano('0.1') },
+                makeTakeWalletAddress(0n, fakeJettonWallet.address, wallet.address));
+            await wallet.send(fakeJettonWallet.getSender(), { value: toNano('0.1') }, {
+                $$type: 'JettonNotification',
+                query_id: 1n,
+                amount: LOCK_AMOUNT,
+                sender: user.address,
+                forward_payload: beginCell().endCell().asSlice(),
+            });
+
+            const res = await wallet.send(attacker.getSender(), { value: toNano('0.5') }, {
+                $$type: 'Claim', query_id: 1n, amount: 0n,
+            });
+            expect(res.transactions).toHaveTransaction({ from: attacker.address, to: wallet.address, success: false });
+        });
+
+        it('43. Claim with qid = 0 -> rejected', async () => {
+            await wallet.send(jettonMaster.getSender(), { value: toNano('0.1') },
+                makeTakeWalletAddress(0n, fakeJettonWallet.address, wallet.address));
+            await wallet.send(fakeJettonWallet.getSender(), { value: toNano('0.1') }, {
+                $$type: 'JettonNotification',
+                query_id: 1n,
+                amount: LOCK_AMOUNT,
+                sender: user.address,
+                forward_payload: beginCell().endCell().asSlice(),
+            });
+
+            const res = await wallet.send(beneficiary.getSender(), { value: toNano('0.5') }, {
+                $$type: 'Claim', query_id: 0n, amount: 0n,
+            });
+            expect(res.transactions).toHaveTransaction({ from: beneficiary.address, to: wallet.address, success: false });
+        });
+
+        it('44. JettonExcesses with wrong sender -> rejected', async () => {
+            const res = await wallet.send(attacker.getSender(), { value: toNano('0.1') }, makeExcesses(0n));
+            expect(res.transactions).toHaveTransaction({ from: attacker.address, to: wallet.address, success: false });
+        });
+
+        it('45. availableClaimable = 0 before unlock', async () => {
+            await wallet.send(jettonMaster.getSender(), { value: toNano('0.1') },
+                makeTakeWalletAddress(0n, fakeJettonWallet.address, wallet.address));
+            await wallet.send(fakeJettonWallet.getSender(), { value: toNano('0.1') }, {
+                $$type: 'JettonNotification',
+                query_id: 1n,
+                amount: LOCK_AMOUNT,
+                sender: user.address,
+                forward_payload: beginCell().endCell().asSlice(),
+            });
             expect(await wallet.getAvailableClaimable()).toEqual(0n);
         });
 
-        it('53. availableClaimable returns full after unlock when funded', async () => {
+        it('46. availableClaimable = LOCK_AMOUNT after unlock', async () => {
             const unlockAt = BigInt(blockchain.now! + 100);
-            const wallet = await createLock(unlockAt);
-            await fundWallet(wallet);
+            wallet = blockchain.openContract(
+                await LockupWallet.fromInit(
+                    2n, factory.address, jettonMaster.address,
+                    beneficiary.address, user.address, LOCK_AMOUNT, unlockAt,
+                ),
+            );
+            await wallet.send(treasury.getSender(), { value: toNano('2') }, null);
+            await wallet.send(jettonMaster.getSender(), { value: toNano('0.1') },
+                makeTakeWalletAddress(0n, fakeJettonWallet.address, wallet.address));
+            await wallet.send(fakeJettonWallet.getSender(), { value: toNano('0.1') }, {
+                $$type: 'JettonNotification',
+                query_id: 1n,
+                amount: LOCK_AMOUNT,
+                sender: user.address,
+                forward_payload: beginCell().endCell().asSlice(),
+            });
+
             blockchain.now = Number(unlockAt) + 10;
             expect(await wallet.getAvailableClaimable()).toEqual(LOCK_AMOUNT);
         });
 
-        it('54. availableClaimable returns 0 if not funded', async () => {
-            const unlockAt = BigInt(blockchain.now! + 100);
-            const wallet = await createLock(unlockAt);
-            blockchain.now = Number(unlockAt) + 10;
-            expect(await wallet.getAvailableClaimable()).toEqual(0n);
-        });
-
-        it('55. availableClaimable returns 0 while pending', async () => {
-            const unlockAt = BigInt(blockchain.now! + 100);
-            const wallet = await createLock(unlockAt);
-            await fundWallet(wallet);
-            blockchain.now = Number(unlockAt) + 10;
-            await wallet.send(
-                beneficiary.getSender(),
-                { value: toNano('0.5') },
-                { $$type: 'Claim', query_id: 1n, amount: 100n },
-            );
-            expect(await wallet.getAvailableClaimable()).toEqual(0n);
+        it('47. getters reflect state', async () => {
+            expect(await wallet.getLockId()).toEqual(1n);
+            expect(await wallet.getBeneficiaryGet()).toEqualAddress(beneficiary.address);
+            expect(await wallet.getClaimedAmount()).toEqual(0n);
+            expect(await wallet.getIsFunded()).toEqual(false);
+            expect(await wallet.getIsPendingClaim()).toEqual(false);
         });
     });
 
     // ═══════════════════════════════════════════════════════════════════════
-    // Factory: v2.6 guard (regression for empty/bad payload — exit 9 → refund)
-    // ═══════════════════════════════════════════════════════════════════════
+describe('LockupWallet: happy-path claim + Excesses', () => {
+    it('48. claim after unlock → TakeWalletAddress → Excesses clears pending', async () => {
+        const unlockAt = BigInt(blockchain.now! + 100);
+        const wallet = blockchain.openContract(
+            await LockupWallet.fromInit(
+                99n,
+                factory.address,
+                jettonMaster.address,
+                beneficiary.address,
+                user.address,
+                LOCK_AMOUNT,
+                unlockAt,
+            ),
+        );
+        await wallet.send(treasury.getSender(), { value: toNano('2') }, null);
 
-    describe('Factory: v2.6 payload guard', () => {
-        it('56. empty forward_payload -> refund instead of exit 9', async () => {
-            const emptyPayload = beginCell().endCell().asSlice();
-            const res = await factory.send(
-                fakeJettonWallet.getSender(),
-                { value: ATTACH_TON },
-                makeJettonNotification(999n, JETTON_AMOUNT, user.address, emptyPayload),
-            );
-            expect(res.transactions).toHaveTransaction({
-                from: fakeJettonWallet.address,
-                to: factory.address,
-                success: true,
-            });
-            // jetton refund goes through factory's jetton wallet
-            expect(res.transactions).toHaveTransaction({
-                from: factory.address,
-                to: fakeJettonWallet.address,
-                op: 0x0f8a7ea5,
-            });
-            // TON back to creator (msg.sender field = user)
-            expect(res.transactions).toHaveTransaction({
-                from: factory.address,
-                to: user.address,
-                success: true,
-            });
-            expect(await factory.getTonFees()).toEqual(0n);
-            expect(await factory.getNextLockId()).toEqual(1n);
+        // 1) discovery: master tells wallet its jetton-wallet address
+        await wallet.send(jettonMaster.getSender(), { value: toNano('0.1') },
+            makeTakeWalletAddress(0n, fakeJettonWallet.address, wallet.address));
+        expect(await wallet.getJettonWallet()).toEqualAddress(fakeJettonWallet.address);
+
+        // 2) fund
+        await wallet.send(fakeJettonWallet.getSender(), { value: toNano('0.1') }, {
+            $$type: 'JettonNotification',
+            query_id: 1n,
+            amount: LOCK_AMOUNT,
+            sender: user.address,
+            forward_payload: beginCell().endCell().asSlice(),
+        });
+        expect(await wallet.getIsFunded()).toEqual(true);
+
+        // 3) advance past unlock
+        blockchain.now = Number(unlockAt) + 10;
+
+        // 4) beneficiary sends Claim
+        const claimQid = 777n;
+        const resClaim = await wallet.send(beneficiary.getSender(), { value: toNano('0.5') }, {
+            $$type: 'Claim', query_id: claimQid, amount: 0n,
+        });
+        expect(resClaim.transactions).toHaveTransaction({
+            from: beneficiary.address, to: wallet.address, success: true,
+        });
+        // pending_claim must be true now
+        expect(await wallet.getIsPendingClaim()).toEqual(true);
+        // claimed not yet increased (ждём TakeWalletAddress)
+        expect(await wallet.getClaimedAmount()).toEqual(0n);
+
+        // 5) master responds with beneficiary's jetton wallet
+        const benJettonWallet = await blockchain.treasury('benJettonWallet');
+        const resTake = await wallet.send(jettonMaster.getSender(), { value: toNano('0.1') },
+            makeTakeWalletAddress(claimQid, benJettonWallet.address, beneficiary.address));
+        expect(resTake.transactions).toHaveTransaction({
+            from: jettonMaster.address, to: wallet.address, success: true,
+        });
+        // claimed increased
+        expect(await wallet.getClaimedAmount()).toEqual(LOCK_AMOUNT);
+        // jetton transfer to beneficiary's wallet emitted
+        expect(resTake.transactions).toHaveTransaction({
+            from: wallet.address, to: fakeJettonWallet.address, op: 0x0f8a7ea5,
         });
 
-        it('57. wrong opcode in full-size payload -> refund instead of exit 9', async () => {
-            const badPayload = beginCell()
-                .storeBit(1)
-                .storeRef(
-                    beginCell()
-                        .storeUint(0xDEAD, 32) // wrong op, full 694-bit body
-                        .storeUint(1n, 64)
-                        .storeAddress(jettonMaster.address)
-                        .storeAddress(beneficiary.address)
-                        .storeUint(BigInt(blockchain.now! + 3600), 64)
-                        .endCell(),
-                )
-                .endCell()
-                .asSlice();
-            const res = await factory.send(
-                fakeJettonWallet.getSender(),
-                { value: ATTACH_TON },
-                makeJettonNotification(888n, JETTON_AMOUNT, user.address, badPayload),
-            );
-            expect(res.transactions).toHaveTransaction({
-                from: fakeJettonWallet.address,
-                to: factory.address,
-                success: true,
-            });
-            expect(await factory.getTonFees()).toEqual(0n);
-            expect(await factory.getNextLockId()).toEqual(1n);
+        // 6) jetton wallet confirms with Excesses
+        await wallet.send(fakeJettonWallet.getSender(), { value: toNano('0.05') },
+            makeExcesses(claimQid));
+        expect(await wallet.getIsPendingClaim()).toEqual(false);
+        expect(await wallet.getAvailableClaimable()).toEqual(0n);
+    });
+
+    it('49. second claim while first pending → rejected', async () => {
+        const unlockAt = BigInt(blockchain.now! + 100);
+        const wallet = blockchain.openContract(
+            await LockupWallet.fromInit(
+                100n, factory.address, jettonMaster.address,
+                beneficiary.address, user.address, LOCK_AMOUNT, unlockAt,
+            ),
+        );
+        await wallet.send(treasury.getSender(), { value: toNano('2') }, null);
+        await wallet.send(jettonMaster.getSender(), { value: toNano('0.1') },
+            makeTakeWalletAddress(0n, fakeJettonWallet.address, wallet.address));
+        await wallet.send(fakeJettonWallet.getSender(), { value: toNano('0.1') }, {
+            $$type: 'JettonNotification',
+            query_id: 1n, amount: LOCK_AMOUNT, sender: user.address,
+            forward_payload: beginCell().endCell().asSlice(),
+        });
+
+        blockchain.now = Number(unlockAt) + 10;
+
+        await wallet.send(beneficiary.getSender(), { value: toNano('0.5') }, {
+            $$type: 'Claim', query_id: 1n, amount: 0n,
+        });
+        expect(await wallet.getIsPendingClaim()).toEqual(true);
+
+        const res = await wallet.send(beneficiary.getSender(), { value: toNano('0.5') }, {
+            $$type: 'Claim', query_id: 2n, amount: 0n,
+        });
+        expect(res.transactions).toHaveTransaction({
+            from: beneficiary.address, to: wallet.address, success: false,
         });
     });
-});
+
+    it('50. wrong amount deposit does NOT mark funded', async () => {
+        const unlockAt = BigInt(blockchain.now! + 3600);
+        const wallet = blockchain.openContract(
+            await LockupWallet.fromInit(
+                101n, factory.address, jettonMaster.address,
+                beneficiary.address, user.address, LOCK_AMOUNT, unlockAt,
+            ),
+        );
+        await wallet.send(treasury.getSender(), { value: toNano('2') }, null);
+        await wallet.send(jettonMaster.getSender(), { value: toNano('0.1') },
+            makeTakeWalletAddress(0n, fakeJettonWallet.address, wallet.address));
+
+        const res = await wallet.send(fakeJettonWallet.getSender(), { value: toNano('0.1') }, {
+            $$type: 'JettonNotification',
+            query_id: 1n,
+            amount: LOCK_AMOUNT - 1n, // wrong
+            sender: user.address,
+            forward_payload: beginCell().endCell().asSlice(),
+        });
+        expect(res.transactions).toHaveTransaction({
+            from: fakeJettonWallet.address, to: wallet.address, success: true,
+        });
+        expect(await wallet.getIsFunded()).toEqual(false);
+    });
+
+    it('51. notify arrives before discovery → fund_sender → discovery marks funded', async () => {
+        const unlockAt = BigInt(blockchain.now! + 3600);
+        const wallet = blockchain.openContract(
+            await LockupWallet.fromInit(
+                102n, factory.address, jettonMaster.address,
+                beneficiary.address, user.address, LOCK_AMOUNT, unlockAt,
+            ),
+        );
+        await wallet.send(treasury.getSender(), { value: toNano('2') }, null);
+
+        // 1) notify BEFORE discovery — jetton_wallet is null
+        await wallet.send(fakeJettonWallet.getSender(), { value: toNano('0.1') }, {
+            $$type: 'JettonNotification',
+            query_id: 1n, amount: LOCK_AMOUNT, sender: user.address,
+            forward_payload: beginCell().endCell().asSlice(),
+        });
+        expect(await wallet.getIsFunded()).toEqual(false);
+
+        // 2) discovery arrives with matching wallet → funded becomes true
+        const res = await wallet.send(jettonMaster.getSender(), { value: toNano('0.1') },
+            makeTakeWalletAddress(0n, fakeJettonWallet.address, wallet.address));
+        expect(res.transactions).toHaveTransaction({
+            from: jettonMaster.address, to: wallet.address, success: true,
+        });
+        expect(await wallet.getJettonWallet()).toEqualAddress(fakeJettonWallet.address);
+        expect(await wallet.getIsFunded()).toEqual(true);
+    });
+  });
+}); 
