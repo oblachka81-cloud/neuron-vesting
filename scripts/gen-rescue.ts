@@ -50,8 +50,14 @@ async function main() {
     const apiKey = process.env.TONCENTER_API_KEY || undefined;
     let qid = BigInt(Date.now());
 
-    for (const [name, addr] of FACTORIES) {
-        console.log('\n═══════════════════════════════════════════════════════════════');
+    let first = true;
+for (const [name, addr] of FACTORIES) {
+    if (!first) {
+        console.log('\n(пауза 3 сек перед следующей фабрикой, чтобы не ловить rate limit)');
+        await new Promise((r) => setTimeout(r, 3000));
+    }
+    first = false;
+    console.log('\n═══════════════════════════════════════════════════════════════');
         console.log(`FACTORY ${name}: ${addr}`);
         console.log('═══════════════════════════════════════════════════════════════');
 
