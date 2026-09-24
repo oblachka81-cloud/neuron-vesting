@@ -196,37 +196,42 @@ contract LockupFactory {
     }
 
     receive(msg: TakeWalletAddress) {
-        let qid: Int = msg.query_id;
-        if ((qid & HIGH_BIT) == 0) { return; }
-        let id: Int = qid & (HIGH_BIT - 1);
-        let child: Address? = self.pending_create.get(id);
-        if (child == null) { return; }
-        require(msg.owner_address == child!!, "wrong owner");
+    let qid: Int = msg.query_id;
+    if ((qid & HIGH_BIT) == 0) { return; }
+    let id: Int = qid & (HIGH_BIT - 1);
+    let child: Address? = self.pending_create.get(id);
+    if (child == null) { return; }
 
-        let jmOpt: Address? = self.create_jetton.get(id);
-        require(jmOpt != null && sender() == jmOpt!!, "not master");
+    // owner_address приходит как Maybe ^MsgAddress
+    let ownerOpt: Cell? = msg.owner_address;
+    require(ownerOpt != null, "no owner");
+    let owner: Address = ownerOpt!!.beginParse().loadAddress();
+    require(owner == child!!, "wrong owner");
 
-        let amountOpt: Int? = self.create_amount.get(id);
-        require(amountOpt != null, "no amount");
+    let jmOpt: Address? = self.create_jetton.get(id);
+    require(jmOpt != null && sender() == jmOpt!!, "not master");
 
-        let jwOpt: Address? = self.own_wallets.get(jmOpt!!);
-        require(jwOpt != null, "no factory wallet");
+    let amountOpt: Int? = self.create_amount.get(id);
+    require(amountOpt != null, "no amount");
 
-        send(SendParameters{
-            to: jwOpt!!,
-            value: TRANSFER_GAS,
-            mode: SendPayGasSeparately,
-            body: JettonTransfer{
-                query_id: qid,
-                amount: amountOpt!!,
-                destination: msg.wallet_address,
-                response_destination: myAddress(),
-                custom_payload: null,
-                forward_ton_amount: ton("0.15"),
-                forward_payload: emptySlice()
-            }.toCell()
-        });
-    }
+    let jwOpt: Address? = self.own_wallets.get(jmOpt!!);
+    require(jwOpt != null, "no factory wallet");
+
+    send(SendParameters{
+        to: jwOpt!!,
+        value: TRANSFER_GAS,
+        mode: SendPayGasSeparately,
+        body: JettonTransfer{
+            query_id: qid,
+            amount: amountOpt!!,
+            destination: msg.wallet_address,
+            response_destination: myAddress(),
+            custom_payload: null,
+            forward_ton_amount: ton("0.15"),
+            forward_payload: emptySlice()
+        }.toCell()
+    });
+}
 
     receive(msg: WithdrawFees) {
         require(sender() == self.treasury, "not treasury");
