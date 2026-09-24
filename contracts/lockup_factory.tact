@@ -21,7 +21,9 @@
 //   F2.  own_wallets[m] set  <=>  treasury approved master m
 //   F3.  wallet_to_master[w] = m  <=>  own_wallets[m] = w  (bijection)
 //   F4.  fees[m] = cumulative platform fee for master m, minus withdrawals
-//   F5.  pending_withdraw[qid] and pending_withdraw_jetton[qid] are set/cleared together
+//   F5.  pending_withdraw[qid] and pending_withdraw_jetton[qid] are set together;
+//        cleared_withdraw[qid] is set to false while in-flight, true after a
+//        bounce has been processed, so a duplicated bounce cannot double-credit
 //   F6.  used_qids is monotonic: once true, never false
 //   F7.  pending_create[id] and create_*[id] are set together, cleared on bounce
 //
@@ -187,8 +189,8 @@ const MAX_FEE_BPS: Int = 1000;
 const CREATE_LOCK_PAYLOAD_BITS: Int = 694;
 
 /// Non-empty forward payload. Some TEP-74 jetton wallets (e.g. COGNIQ)
-/// enforce `forward_payload.bits() >= 1` and revert with exit code 708 on
-/// an empty slice. A single zero bit is the minimal valid payload.
+/// enforce `forward_payload.bits() >= 1` and revert with exit code 708
+/// on an empty slice. A single zero bit is the minimal valid payload.
 const EMPTY_FORWARD_PAYLOAD: Slice = beginCell().storeBit(0).endCell().asSlice();
 
 // ─── Contract ──────────────────────────────────────────────────────────────
@@ -201,11 +203,11 @@ contract LockupFactory {
     fee_bps: Int as uint16;
     fee_ton: Int as coins;
 
-    // ── Whitelist ──────────────────────────────────────────────────────
+    // ── Whitelist (F2, F3) ─────────────────────────────────────────────
     own_wallets: map<Address, Address>;       // master -> factory jetton wallet
     wallet_to_master: map<Address, Address>;  // factory jetton wallet -> master
 
-    // ── Fee accounting ─────────────────────────────────────────────────
+    // ── Fee accounting (F4) ────────────────────────────────────────────
     fees: map<Address, Int>;                  // master -> cumulative jetton fee
     ton_fees: Int as coins;
 
@@ -221,8 +223,11 @@ contract LockupFactory {
     create_fee_ton: map<Int, Int>;
 
     // ── In-flight withdraw tracking (F5) ───────────────────────────────
-    pending_withdraw: map<Int, Int?>;
-    pending_withdraw_jetton: map<Int, Address?>;
+    // NOTE: Tact does not support optional value types inside maps.
+    // We use a parallel "cleared" flag instead of set(null) for cleanup.
+    pending_withdraw: map<Int, Int>;
+    pending_withdraw_jetton: map<Int, Address>;
+    cleared_withdraw: map<Int, Bool>;
 
     init(treasury: Address, salt: Int, fee_bps: Int, fee_ton: Int) {
         self.next_id = 1;
@@ -475,6 +480,7 @@ contract LockupFactory {
         self.fees.set(msg.jetton_master, cur - msg.amount);
         self.pending_withdraw.set(msg.query_id, msg.amount);
         self.pending_withdraw_jetton.set(msg.query_id, msg.jetton_master);
+        self.cleared_withdraw.set(msg.query_id, false); // in-flight
 
         send(SendParameters{
             to: jw!!,
@@ -572,7 +578,12 @@ contract LockupFactory {
         // ── Case B: fee-withdrawal bounce ──────────────────────────────
         let amtOpt: Int? = self.pending_withdraw.get(qid);
         let jmOpt2: Address? = self.pending_withdraw_jetton.get(qid);
-        if (amtOpt != null && jmOpt2 != null) {
+        let clearedOpt: Bool? = self.cleared_withdraw.get(qid);
+
+        // Skip if not tracked, or already cleared (duplicated bounce).
+        if (amtOpt != null && jmOpt2 != null
+            && clearedOpt != null && !clearedOpt!!) {
+
             let jm: Address = jmOpt2!!;
             let jwOpt: Address? = self.own_wallets.get(jm);
             require(jwOpt != null, "no factory wallet");
@@ -582,8 +593,8 @@ contract LockupFactory {
             let cur: Int = opt != null ? opt!! : 0;
             self.fees.set(jm, cur + amtOpt!!);
 
-            self.pending_withdraw.set(qid, null);
-            self.pending_withdraw_jetton.set(qid, null);
+            // Mark cleared so a duplicated bounce cannot double-credit.
+            self.cleared_withdraw.set(qid, true);
         }
     }
 
