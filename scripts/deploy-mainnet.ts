@@ -84,7 +84,7 @@ async function main() {
     // ── Fee params from env (with defaults) ────────────────────────────
     const FEE_BPS = Number(process.env.PLATFORM_FEE_BPS ?? '50');
     const FEE_TON_NANO = BigInt(process.env.PLATFORM_FEE_TON_NANO ?? '1000000000');
-    const SALT = BigInt(process.env.DEPLOY_SALT ?? '1');
+    const SALT = BigInt(process.env.DEPLOY_SALT ?? '3');
 
     if (FEE_BPS < 0 || FEE_BPS > 1000) throw new Error('PLATFORM_FEE_BPS must be 0..1000');
     if (FEE_TON_NANO < 0n) throw new Error('PLATFORM_FEE_TON_NANO must be >= 0');
