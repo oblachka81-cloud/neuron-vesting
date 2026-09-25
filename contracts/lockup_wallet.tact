@@ -195,7 +195,7 @@ contract LockupWallet {
                 body: JettonTransfer{
                     query_id: self.pending_query_id,
                     amount: self.pending_amount,
-                    destination: msg.wallet_address,
+                    destination: child!!,
                     response_destination: myAddress(),
                     custom_payload: null,
                     forward_ton_amount: CLAIM_FORWARD,
