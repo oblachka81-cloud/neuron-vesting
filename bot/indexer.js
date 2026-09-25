@@ -6,7 +6,7 @@ const { TonClient } = require('@ton/ton');
 const db = require('./db');
 
 const FACTORY_ADDRESS = process.env.FACTORY_ADDRESS;
-const NETWORK = process.env.NETWORK || 'testnet';
+const NETWORK = process.env.NETWORK || 'mainnet';
 
 const client = new TonClient({
   endpoint: `https://${NETWORK === 'testnet' ? 'testnet.' : ''}toncenter.com/api/v2/jsonRPC`,
@@ -14,79 +14,85 @@ const client = new TonClient({
 });
 
 // ── Event parser — v4.2.0 factory + v4.1.0 wallet opcodes ────────────────
-// Factory events:   0x100..0x11F
-// Wallet events:    0x124..0x12A
 function parseEvent(body) {
-  if (!body || body.bits.length < 32) return null;
-  const s = body.beginParse();
-  const op = s.loadUint(32);
+  // Защитная обёртка: если что-то сломается при парсинге — логируем и пропускаем,
+  // чтобы индексатор никогда не падал на одном битом сообщении.
+  try {
+    if (!body || typeof body.beginParse !== 'function') return null;
+    const s = body.beginParse();
+    if (s.remainingBits < 32) return null;
+    const op = s.loadUint(32);
 
-  // ── Factory events (v4.2.0) ─────────────────────────────────────────
-  if (op === 0x100) return {
-    type: 'LockCreated',
-    lock_id: Number(s.loadUintBig(64)),
-    creator: s.loadAddress().toString(),
-    beneficiary: s.loadAddress().toString(),
-    jetton: s.loadAddress().toString(),
-    amount: s.loadCoins().toString(),
-    unlock_at: Number(s.loadUintBig(64)),
-  };
-  if (op === 0x106) return {
-    type: 'TonFeeCollected',
-    lock_id: Number(s.loadUintBig(64)),
-    amount: s.loadCoins().toString(),
-  };
-  if (op === 0x107) return {
-    type: 'FeesWithdrawn',
-    query_id: Number(s.loadUintBig(64)),
-    jetton_master: s.loadAddress().toString(),
-    amount: s.loadCoins().toString(),
-    destination: s.loadAddress().toString(),
-  };
-  if (op === 0x109) return {
-    type: 'JettonWalletSet',
-    jetton_master: s.loadAddress().toString(),
-    jetton_wallet: s.loadAddress().toString(),
-  };
-  if (op === 0x111) return {
-    type: 'LockCreationFailed',
-    lock_id: Number(s.loadUintBig(64)),
-    creator: s.loadAddress().toString(),
-    jetton: s.loadAddress().toString(),
-    amount: s.loadCoins().toString(),
-  };
-  if (op === 0x112) return {
-    type: 'CreateBounced',
-    lock_id: Number(s.loadUintBig(64)),
-    amount: s.loadCoins().toString(),
-  };
-  if (op === 0x115) return {
-    type: 'RefundRequired',
-    creator: s.loadAddress().toString(),
-    jetton: s.loadAddress().toString(),
-    amount: s.loadCoins().toString(),
-  };
+    // ── Factory events (v4.2.0) ─────────────────────────────────────────
+    if (op === 0x100) return {
+      type: 'LockCreated',
+      lock_id: Number(s.loadUintBig(64)),
+      creator: s.loadAddress().toString(),
+      beneficiary: s.loadAddress().toString(),
+      jetton: s.loadAddress().toString(),
+      amount: s.loadCoins().toString(),
+      unlock_at: Number(s.loadUintBig(64)),
+    };
+    if (op === 0x106) return {
+      type: 'TonFeeCollected',
+      lock_id: Number(s.loadUintBig(64)),
+      amount: s.loadCoins().toString(),
+    };
+    if (op === 0x107) return {
+      type: 'FeesWithdrawn',
+      query_id: Number(s.loadUintBig(64)),
+      jetton_master: s.loadAddress().toString(),
+      amount: s.loadCoins().toString(),
+      destination: s.loadAddress().toString(),
+    };
+    if (op === 0x109) return {
+      type: 'JettonWalletSet',
+      jetton_master: s.loadAddress().toString(),
+      jetton_wallet: s.loadAddress().toString(),
+    };
+    if (op === 0x111) return {
+      type: 'LockCreationFailed',
+      lock_id: Number(s.loadUintBig(64)),
+      creator: s.loadAddress().toString(),
+      jetton: s.loadAddress().toString(),
+      amount: s.loadCoins().toString(),
+    };
+    if (op === 0x112) return {
+      type: 'CreateBounced',
+      lock_id: Number(s.loadUintBig(64)),
+      amount: s.loadCoins().toString(),
+    };
+    if (op === 0x115) return {
+      type: 'RefundRequired',
+      creator: s.loadAddress().toString(),
+      jetton: s.loadAddress().toString(),
+      amount: s.loadCoins().toString(),
+    };
 
-  // ── Wallet events (v4.1.0) ──────────────────────────────────────────
-  if (op === 0x124) return {
-    type: 'LockFunded',
-    lock_id: Number(s.loadUintBig(64)),
-    amount: s.loadCoins().toString(),
-  };
-  if (op === 0x125) return {
-    type: 'Claimed',
-    lock_id: Number(s.loadUintBig(64)),
-    amount: s.loadCoins().toString(),
-    beneficiary: s.loadAddress().toString(),
-    beneficiary_wallet: s.loadAddress().toString(),
-  };
-  if (op === 0x126) return {
-    type: 'ClaimBounced',
-    lock_id: Number(s.loadUintBig(64)),
-    amount: s.loadCoins().toString(),
-  };
+    // ── Wallet events (v4.1.0) ──────────────────────────────────────────
+    if (op === 0x124) return {
+      type: 'LockFunded',
+      lock_id: Number(s.loadUintBig(64)),
+      amount: s.loadCoins().toString(),
+    };
+    if (op === 0x125) return {
+      type: 'Claimed',
+      lock_id: Number(s.loadUintBig(64)),
+      amount: s.loadCoins().toString(),
+      beneficiary: s.loadAddress().toString(),
+      beneficiary_wallet: s.loadAddress().toString(),
+    };
+    if (op === 0x126) return {
+      type: 'ClaimBounced',
+      lock_id: Number(s.loadUintBig(64)),
+      amount: s.loadCoins().toString(),
+    };
 
-  return null;
+    return null;
+  } catch (e) {
+    console.error('PARSE FAIL ::', e.message);
+    return null;
+  }
 }
 
 const seen = new Set();
@@ -144,7 +150,9 @@ async function pollWallets() {
         }
       }
       await new Promise((r) => setTimeout(r, 300));
-    } catch (e) { /* wallet not active yet */ }
+    } catch (e) {
+      console.error('Poll wallet error for', lock.lockup_wallet, ':', e.message);
+    }
   }
 }
 
