@@ -65,7 +65,7 @@ export function mountWizard(tc: TonConnectUI) {
       const amount = (document.getElementById('amount') as HTMLInputElement).value;
       const beneficiary = Address.parse((document.getElementById('beneficiary') as HTMLInputElement).value.trim());
       const unlockAtInput = (document.getElementById('unlockAt') as HTMLInputElement).value;
-      const unlockAt = BigInt(Math.floor(new Date(unlockAtInput + 'Z').getTime() / 1000));
+      const unlockAt = BigInt(Math.floor(new Date(unlockAtInput).getTime() / 1000));
       const creator = Address.parse(w.account.address);
       const amountNano = BigInt(Math.round(parseFloat(amount) * 1e9));
       const queryId = BigInt(Date.now());
