@@ -1,10 +1,18 @@
 // bot/db.js — PostgreSQL wrapper + schema + queries (v4: + applications, whitelist, sessions, ton_fees)
 const postgres = require('postgres');
+const { Address } = require('@ton/core');
 
 const DATABASE_URL = process.env.DATABASE_URL;
 if (!DATABASE_URL) { console.error('DATABASE_URL is not set'); process.exit(1); }
 
 const sql = postgres(DATABASE_URL, { ssl: 'prefer', max: 5, idle_timeout: 20, connect_timeout: 10 });
+
+// ── Address normalization ─────────────────────────────────────────────────
+// Приводим любой адрес к raw-формату (0:hex) для единообразного сравнения.
+function normAddr(a) {
+  try { return Address.parse(a).toRawString(); }
+  catch { return String(a || '').toLowerCase(); }
+}
 
 async function migrate() {
   await sql`
@@ -19,10 +27,12 @@ async function migrate() {
       lockup_wallet TEXT NOT NULL,
       factory TEXT NOT NULL,
       fee_jetton NUMERIC NOT NULL DEFAULT 0,
+      funded BOOLEAN NOT NULL DEFAULT FALSE,
       created_at TIMESTAMPTZ DEFAULT NOW()
     )`;
   
   await sql`ALTER TABLE locks ADD COLUMN IF NOT EXISTS fee_jetton NUMERIC NOT NULL DEFAULT 0`;
+  await sql`ALTER TABLE locks ADD COLUMN IF NOT EXISTS funded BOOLEAN NOT NULL DEFAULT FALSE`;
 
   await sql`
     CREATE TABLE IF NOT EXISTS lock_events (
@@ -43,7 +53,6 @@ async function migrate() {
   await sql`INSERT INTO indexer_cursor (id, last_lt, last_hash) VALUES (1, 0, NULL) ON CONFLICT (id) DO NOTHING`;
   await sql`UPDATE indexer_cursor SET last_lt = 0, last_hash = NULL WHERE id = 1 AND (last_hash IS NULL OR LENGTH(last_hash) <> 64)`;
 
-  // v4: whitelist — curated list of approved jettons with metadata
   await sql`
     CREATE TABLE IF NOT EXISTS whitelist (
       jetton_master TEXT PRIMARY KEY,
@@ -55,7 +64,6 @@ async function migrate() {
       metadata JSONB DEFAULT '{}'::jsonb
     )`;
 
-  // v4: applications — pending/rejected/decided whitelist requests
   await sql`
     CREATE TABLE IF NOT EXISTS applications (
       id SERIAL PRIMARY KEY,
@@ -73,7 +81,6 @@ async function migrate() {
       created_at TIMESTAMPTZ DEFAULT NOW()
     )`;
 
-  // v4: admin sessions (in-memory is fine too, but DB keeps restart-proof)
   await sql`
     CREATE TABLE IF NOT EXISTS admin_sessions (
       token TEXT PRIMARY KEY,
@@ -81,7 +88,6 @@ async function migrate() {
       created_at TIMESTAMPTZ DEFAULT NOW()
     )`;
 
-  // v4: factory state — counters that mirror on-chain for dashboard
   await sql`
     CREATE TABLE IF NOT EXISTS factory_state (
       id INT PRIMARY KEY DEFAULT 1,
@@ -92,7 +98,7 @@ async function migrate() {
   await sql`INSERT INTO factory_state (id, ton_fees_accumulated, ton_fees_withdrawn)
             VALUES (1, 0, 0) ON CONFLICT (id) DO NOTHING`;
 
-  console.log('Database migrated (v4)');
+  console.log('Database migrated (v4.1)');
 }
 
 const big = (v) => BigInt(v ?? 0);
@@ -112,9 +118,14 @@ async function insertLock(l) {
   await sql`
     INSERT INTO locks (lock_id, creator, beneficiary, jetton_master, amount, unlock_at, lockup_wallet, factory, fee_jetton)
     VALUES (
-      ${String(l.lock_id)}, ${String(l.creator)}, ${String(l.beneficiary)},
-      ${String(l.jetton_master)}, ${String(l.amount)}, ${String(l.unlock_at)},
-      ${String(l.lockup_wallet)}, ${String(l.factory)}, ${fee.toString()}
+      ${String(l.lock_id)},
+      ${normAddr(l.creator)},
+      ${normAddr(l.beneficiary)},
+      ${normAddr(l.jetton_master)},
+      ${String(l.amount)}, ${String(l.unlock_at)},
+      ${normAddr(l.lockup_wallet)},
+      ${normAddr(l.factory)},
+      ${fee.toString()}
     ) ON CONFLICT (lock_id) DO NOTHING`;
   await sql`UPDATE factory_state
             SET ton_fees_accumulated = ton_fees_accumulated + 1000000000, updated_at = NOW()
@@ -129,6 +140,12 @@ async function markExtended(lockId, newUnlockAt) {
   await sql`UPDATE locks SET unlock_at = ${String(newUnlockAt)} WHERE lock_id = ${String(lockId)}`;
 }
 
+// ── markFunded — фиксирует, что LockFunded (0x124) пришёл и замок получил жетоны
+async function markFunded(lockId) {
+  await sql`UPDATE locks SET funded = TRUE WHERE lock_id = ${String(lockId)}`;
+  console.log('LockFunded #' + lockId + ' → funded=TRUE');
+}
+
 async function insertEvent(e) {
   await sql`
     INSERT INTO lock_events (lock_id, event_type, event_data, tx_hash)
@@ -136,7 +153,9 @@ async function insertEvent(e) {
     ON CONFLICT (tx_hash) DO NOTHING`;
 }
 
+// ── getLocks — ищем по raw-адресу (единый формат после normAddr в insertLock)
 async function getLocks(wallet) {
+  const w = normAddr(wallet);
   return await sql`
     SELECT *, CASE
       WHEN claimed_amount >= amount THEN 'claimed'
@@ -144,7 +163,7 @@ async function getLocks(wallet) {
       ELSE 'locked'
     END AS status
     FROM locks
-    WHERE creator = ${wallet} OR beneficiary = ${wallet}
+    WHERE creator = ${w} OR beneficiary = ${w}
     ORDER BY lock_id DESC LIMIT 100`;
 }
 
@@ -176,14 +195,14 @@ async function listWhitelist() {
 async function upsertWhitelist(row) {
   await sql`
     INSERT INTO whitelist (jetton_master, name, symbol, description, applicant, metadata)
-    VALUES (${row.jetton_master}, ${row.name || null}, ${row.symbol || null},
+    VALUES (${normAddr(row.jetton_master)}, ${row.name || null}, ${row.symbol || null},
             ${row.description || null}, ${row.applicant || null}, ${sql.json(row.metadata || {})})
     ON CONFLICT (jetton_master) DO UPDATE SET
       name = EXCLUDED.name, symbol = EXCLUDED.symbol, description = EXCLUDED.description,
       applicant = EXCLUDED.applicant, metadata = EXCLUDED.metadata, approved_at = NOW()`;
 }
 async function removeWhitelist(jettonMaster) {
-  await sql`DELETE FROM whitelist WHERE jetton_master = ${jettonMaster}`;
+  await sql`DELETE FROM whitelist WHERE jetton_master = ${normAddr(jettonMaster)}`;
 }
 
 // ---- v4: applications ----
@@ -199,13 +218,13 @@ async function getApplication(id) {
   return rows[0] || null;
 }
 async function getApplicationByMaster(jettonMaster) {
-  const rows = await sql`SELECT * FROM applications WHERE jetton_master = ${jettonMaster}`;
+  const rows = await sql`SELECT * FROM applications WHERE jetton_master = ${normAddr(jettonMaster)}`;
   return rows[0] || null;
 }
 async function insertApplication(a) {
   const rows = await sql`
     INSERT INTO applications (jetton_master, applicant, telegram_id, applicant_name, project_url, notes)
-    VALUES (${a.jetton_master}, ${a.applicant}, ${a.telegram_id || null},
+    VALUES (${normAddr(a.jetton_master)}, ${a.applicant}, ${a.telegram_id || null},
             ${a.applicant_name || null}, ${a.project_url || null}, ${a.notes || null})
     ON CONFLICT (jetton_master) DO UPDATE SET
       applicant = EXCLUDED.applicant, telegram_id = EXCLUDED.telegram_id,
@@ -244,9 +263,9 @@ async function listEvents(limit) {
 async function close() { await sql.end(); }
 
 module.exports = {
-  migrate, getCursor, setCursor, insertLock, markClaimed, markExtended, insertEvent,
+  migrate, getCursor, setCursor, insertLock, markClaimed, markExtended, markFunded, insertEvent,
   getLocks, getOpenLocks, getStats, close,
   listWhitelist, upsertWhitelist, removeWhitelist,
   listApplications, getApplication, getApplicationByMaster, insertApplication, decideApplication,
-  createSession, getSession, deleteSession, purgeExpiredSessions, listEvents, 
+  createSession, getSession, deleteSession, purgeExpiredSessions, listEvents,
 };
