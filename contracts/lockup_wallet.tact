@@ -298,7 +298,9 @@ contract LockupWallet {
     /// claims can proceed.
     receive(msg: JettonExcesses) {
         let jw: Address? = self.jetton_wallet;
-        require(jw != null && sender() == jw!!, "not our wallet");
+        if (jw == null || sender() != jw!!) {
+            return; 
+        }
         if (self.pending_claim && msg.query_id == self.pending_query_id) {
             self.pending_claim = false;
             self.pending_amount = 0;
