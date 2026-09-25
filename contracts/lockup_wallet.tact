@@ -157,7 +157,7 @@ contract LockupWallet {
         require(sender() == self.factory, "not factory");
         send(SendParameters{
             to: self.jetton_master,
-            value: DISCOVERY_GAS,
+            value: WALLET_DISCOVERY_GAS,
             mode: SendPayGasSeparately,
             body: ProvideWalletAddress{
                 query_id: self.lock_id,
@@ -280,7 +280,7 @@ contract LockupWallet {
 
         send(SendParameters{
             to: self.jetton_master,
-            value: DISCOVERY_GAS,
+            value: WALLET_DISCOVERY_GAS,
             mode: SendPayGasSeparately,
             body: ProvideWalletAddress{
                 query_id: msg.query_id,
