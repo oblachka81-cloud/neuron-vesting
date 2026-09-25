@@ -166,6 +166,9 @@ const TRANSFER_GAS: Int = ton("0.05");
 /// jetton wallets require a non-zero value to emit a notification.
 const TRANSFER_FORWARD: Int = ton("0.01");
 
+/// Gas attached to a TEP-89 `provide_wallet_address` request.
+const DISCOVERY_GAS: Int = ton("0.05");
+
 /// Gas attached when rescuing jettons from the factory's jetton wallet.
 const RESCUE_GAS: Int = ton("0.05");
 
@@ -184,6 +187,11 @@ const MAX_FEE_BPS: Int = 1000;
 /// Minimal payload size in bits: op (32) + qid (64) + 2 addresses (2×267) +
 /// unlock_at (64). Used to reject malformed payloads before parsing.
 const CREATE_LOCK_PAYLOAD_BITS: Int = 694;
+
+/// Non-empty forward payload. Some TEP-74 implementations (e.g. COGNIQ)
+/// enforce `forward_payload.bits() >= 1` and revert with exit code 708 on
+/// an empty slice. A single zero bit is the minimal valid payload.
+const EMPTY_FORWARD_PAYLOAD: Cell = beginCell().storeBit(false).endCell();
 
 // ─── Contract ──────────────────────────────────────────────────────────────
 
@@ -445,7 +453,7 @@ contract LockupFactory {
                 response_destination: myAddress(),
                 custom_payload: null,
                 forward_ton_amount: TRANSFER_FORWARD,
-                forward_payload: EMPTY_FORWARD_PAYLOAD
+                forward_payload: EMPTY_FORWARD_PAYLOAD.asSlice()
             }.toCell()
         });
     }
@@ -485,7 +493,7 @@ contract LockupFactory {
                 response_destination: myAddress(),
                 custom_payload: null,
                 forward_ton_amount: TRANSFER_FORWARD,
-                forward_payload: EMPTY_FORWARD_PAYLOAD
+                forward_payload: EMPTY_FORWARD_PAYLOAD.asSlice()
             }.toCell()
         });
 
@@ -656,7 +664,7 @@ contract LockupFactory {
                 response_destination: myAddress(),
                 custom_payload: null,
                 forward_ton_amount: TRANSFER_FORWARD,
-                forward_payload: EMPTY_FORWARD_PAYLOAD
+                forward_payload: EMPTY_FORWARD_PAYLOAD.asSlice()
             }.toCell()
         });
     }
