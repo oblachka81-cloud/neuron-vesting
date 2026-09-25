@@ -24,15 +24,20 @@ function parseEvent(body) {
     const op = s.loadUint(32);
 
     // ── Factory events (v4.2.0) ─────────────────────────────────────────
-    if (op === 0x100) return {
-      type: 'LockCreated',
-      lock_id: Number(s.loadUintBig(64)),
-      creator: s.loadAddress().toString(),
-      beneficiary: s.loadAddress().toString(),
-      jetton: s.loadAddress().toString(),
-      amount: s.loadCoins().toString(),
-      unlock_at: Number(s.loadUintBig(64)),
-    };
+    if (op === 0x100) {
+      // Читаем поля по одному. unlock_at может отсутствовать в некоторых
+      // сборках — тогда оставляем 0, чтобы не падать на Index out of range.
+      const ev = {
+        type: 'LockCreated',
+        lock_id: Number(s.loadUintBig(64)),
+        creator: s.loadAddress().toString(),
+        beneficiary: s.loadAddress().toString(),
+        jetton: s.loadAddress().toString(),
+        amount: s.loadCoins().toString(),
+      };
+      ev.unlock_at = s.remainingBits >= 64 ? Number(s.loadUintBig(64)) : 0;
+      return ev;
+    }
     if (op === 0x106) return {
       type: 'TonFeeCollected',
       lock_id: Number(s.loadUintBig(64)),
@@ -106,20 +111,47 @@ async function pollFactory() {
     const lt = BigInt(tx.lt);
     if (lt <= cursor.lt) continue;
     if (lt > maxLt) maxLt = lt;
-    let created = null;
+
+    // Основной путь: вытащить параметры лока из StateInit child-кошелька,
+    // который фабрика деплоит в этой же транзакции. Эти данные — источник
+    // истины, они не зависят от того, что именно попало в event-log.
     let child = null;
+    let initMeta = null;
     for (const msg of tx.outMessages.values()) {
-      if (msg.info.type === 'external-out') {
-        const ev = parseEvent(msg.body);
-        if (ev && ev.type === 'LockCreated') created = ev;
-      } else if (msg.info.type === 'internal' && msg.init) {
-        child = msg.info.dest.toString();
+      try {
+        if (msg.info.type === 'internal' && msg.init && msg.info.dest) {
+          child = msg.info.dest.toString();
+          const d = msg.init.data.beginParse();
+          initMeta = {
+            lock_id:       Number(d.loadUintBig(64)),
+            factory:       d.loadAddress().toString(),
+            jetton_master: d.loadAddress().toString(),
+            beneficiary:   d.loadAddress().toString(),
+            creator:       d.loadAddress().toString(),
+            amount:        d.loadCoins().toString(),
+            unlock_at:     Number(d.loadUintBig(64)),
+          };
+        }
+      } catch (e) {
+        console.error('init parse skip:', e.message);
       }
     }
-    if (created) {
-      await db.insertLock({ ...created, jetton_master: created.jetton, lockup_wallet: child || '', factory: FACTORY_ADDRESS });
-      await db.insertEvent({ lock_id: created.lock_id, event_type: 'LockCreated', event_data: created, tx_hash: eventKey(FACTORY_ADDRESS, tx.lt, 'LockCreated') });
-      console.log('Indexed LockCreated #' + created.lock_id, '->', child);
+
+    if (initMeta && child) {
+      const rec = { ...initMeta, type: 'LockCreated' };
+      await db.insertLock({
+        ...rec,
+        jetton_master: rec.jetton_master,
+        lockup_wallet: child,
+        factory: FACTORY_ADDRESS,
+      });
+      await db.insertEvent({
+        lock_id: rec.lock_id,
+        event_type: 'LockCreated',
+        event_data: rec,
+        tx_hash: eventKey(FACTORY_ADDRESS, tx.lt, 'LockCreated'),
+      });
+      console.log('Indexed LockCreated #' + rec.lock_id, '->', child);
     }
   }
   if (maxLt > cursor.lt) await db.setCursor(maxLt, null);
