@@ -1,4 +1,4 @@
-// bot/indexer.js — polls factory + lockup wallets, parses v2.5.1/v2.6.1 events
+// bot/indexer.js — polls factory + lockup wallets, parses v4.2.0/v4.1.0 events
 BigInt.prototype.toJSON = function () { return this.toString(); };
 
 const { Address } = require('@ton/core');
