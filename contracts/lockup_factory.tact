@@ -157,7 +157,7 @@ message(0x115) RefundRequired {
 const GAS_BUFFER_TON: Int = ton("0.1");
 
 /// Gas attached when deploying a LockupWallet.
-const DEPLOY_GAS: Int = ton("0.05");
+const DEPLOY_GAS: Int = ton("0.15");
 
 /// Gas attached to the jetton transfer that funds the LockupWallet.
 const TRANSFER_GAS: Int = ton("0.05");
