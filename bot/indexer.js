@@ -13,7 +13,7 @@ const client = new TonClient({
   apiKey: process.env.TONCENTER_API_KEY,
 });
 
-// ── Event parser — v2.5.1 factory + v2.6.1 wallet opcodes ────────────────
+// ── Event parser — v4.2.0 factory + v4.1.0 wallet opcodes ────────────────
 // Factory events:   0x100..0x11F
 // Wallet events:    0x124..0x12A
 function parseEvent(body) {
@@ -21,7 +21,7 @@ function parseEvent(body) {
   const s = body.beginParse();
   const op = s.loadUint(32);
 
-  // ── Factory events (0x100-0x11F) ─────────────────────────────────────
+  // ── Factory events (v4.2.0) ─────────────────────────────────────────
   if (op === 0x100) return {
     type: 'LockCreated',
     lock_id: Number(s.loadUintBig(64)),
@@ -30,11 +30,6 @@ function parseEvent(body) {
     jetton: s.loadAddress().toString(),
     amount: s.loadCoins().toString(),
     unlock_at: Number(s.loadUintBig(64)),
-  };
-  if (op === 0x104) return {
-    type: 'WithdrawBounced',
-    query_id: Number(s.loadUintBig(64)),
-    amount: s.loadCoins().toString(),
   };
   if (op === 0x106) return {
     type: 'TonFeeCollected',
@@ -48,27 +43,15 @@ function parseEvent(body) {
     amount: s.loadCoins().toString(),
     destination: s.loadAddress().toString(),
   };
-  if (op === 0x108) return {
-    type: 'OverpayRefunded',
-    creator: s.loadAddress().toString(),
-    amount: s.loadCoins().toString(),
-  };
   if (op === 0x109) return {
     type: 'JettonWalletSet',
     jetton_master: s.loadAddress().toString(),
     jetton_wallet: s.loadAddress().toString(),
   };
-  if (op === 0x110) return {
-    type: 'TonFeesWithdrawn',
-    query_id: Number(s.loadUintBig(64)),
-    amount: s.loadCoins().toString(),
-    destination: s.loadAddress().toString(),
-  };
   if (op === 0x111) return {
     type: 'LockCreationFailed',
     lock_id: Number(s.loadUintBig(64)),
     creator: s.loadAddress().toString(),
-    beneficiary: s.loadAddress().toString(),
     jetton: s.loadAddress().toString(),
     amount: s.loadCoins().toString(),
   };
@@ -77,49 +60,29 @@ function parseEvent(body) {
     lock_id: Number(s.loadUintBig(64)),
     amount: s.loadCoins().toString(),
   };
+  if (op === 0x115) return {
+    type: 'RefundRequired',
+    creator: s.loadAddress().toString(),
+    jetton: s.loadAddress().toString(),
+    amount: s.loadCoins().toString(),
+  };
 
-  // ── Wallet events (0x124-0x12A) ──────────────────────────────────────
+  // ── Wallet events (v4.1.0) ──────────────────────────────────────────
   if (op === 0x124) return {
+    type: 'LockFunded',
+    lock_id: Number(s.loadUintBig(64)),
+    amount: s.loadCoins().toString(),
+  };
+  if (op === 0x125) return {
     type: 'Claimed',
     lock_id: Number(s.loadUintBig(64)),
     amount: s.loadCoins().toString(),
     beneficiary: s.loadAddress().toString(),
-    query_id: Number(s.loadUintBig(64)),
-  };
-  if (op === 0x125) return {
-    type: 'Extended',
-    lock_id: Number(s.loadUintBig(64)),
-    old_unlock_at: Number(s.loadUintBig(64)),
-    new_unlock_at: Number(s.loadUintBig(64)),
+    beneficiary_wallet: s.loadAddress().toString(),
   };
   if (op === 0x126) return {
     type: 'ClaimBounced',
     lock_id: Number(s.loadUintBig(64)),
-    amount: s.loadCoins().toString(),
-    query_id: Number(s.loadUintBig(64)),
-  };
-  if (op === 0x127) return {
-    type: 'PendingClaimReset',
-    lock_id: Number(s.loadUintBig(64)),
-    amount: s.loadCoins().toString(),
-    query_id: Number(s.loadUintBig(64)),
-  };
-  if (op === 0x128) return {
-    type: 'StaleBounceIgnored',
-    lock_id: Number(s.loadUintBig(64)),
-    query_id: Number(s.loadUintBig(64)),
-    pending_query_id: Number(s.loadUintBig(64)),
-  };
-  if (op === 0x129) return {
-    type: 'LockFunded',
-    lock_id: Number(s.loadUintBig(64)),
-    amount: s.loadCoins().toString(),
-    query_id: Number(s.loadUintBig(64)),
-  };
-  if (op === 0x12A) return {
-    type: 'UnexpectedDeposit',
-    lock_id: Number(s.loadUintBig(64)),
-    sender: s.loadAddress().toString(),
     amount: s.loadCoins().toString(),
   };
 
