@@ -80,7 +80,7 @@ message(0x126) ClaimBounced {
 // ─── Constants ─────────────────────────────────────────────────────────────
 
 /// Gas attached to a `provide_wallet_address` request to the jetton master.
-const DISCOVERY_GAS: Int = ton("0.05");
+const WALLET_DISCOVERY_GAS: Int = ton("0.05");
 
 /// Gas attached to the outgoing JettonTransfer when claiming.
 const CLAIM_GAS: Int = ton("0.05");
