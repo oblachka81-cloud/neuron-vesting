@@ -13,20 +13,14 @@ const client = new TonClient({
   apiKey: process.env.TONCENTER_API_KEY,
 });
 
-// ── Event parser — v4.2.0 factory + v4.1.0 wallet opcodes ────────────────
 function parseEvent(body) {
-  // Защитная обёртка: если что-то сломается при парсинге — логируем и пропускаем,
-  // чтобы индексатор никогда не падал на одном битом сообщении.
   try {
     if (!body || typeof body.beginParse !== 'function') return null;
     const s = body.beginParse();
     if (s.remainingBits < 32) return null;
     const op = s.loadUint(32);
 
-    // ── Factory events (v4.2.0) ─────────────────────────────────────────
     if (op === 0x100) {
-      // Читаем поля по одному. unlock_at может отсутствовать в некоторых
-      // сборках — тогда оставляем 0, чтобы не падать на Index out of range.
       const ev = {
         type: 'LockCreated',
         lock_id: Number(s.loadUintBig(64)),
@@ -38,60 +32,15 @@ function parseEvent(body) {
       ev.unlock_at = s.remainingBits >= 64 ? Number(s.loadUintBig(64)) : 0;
       return ev;
     }
-    if (op === 0x106) return {
-      type: 'TonFeeCollected',
-      lock_id: Number(s.loadUintBig(64)),
-      amount: s.loadCoins().toString(),
-    };
-    if (op === 0x107) return {
-      type: 'FeesWithdrawn',
-      query_id: Number(s.loadUintBig(64)),
-      jetton_master: s.loadAddress().toString(),
-      amount: s.loadCoins().toString(),
-      destination: s.loadAddress().toString(),
-    };
-    if (op === 0x109) return {
-      type: 'JettonWalletSet',
-      jetton_master: s.loadAddress().toString(),
-      jetton_wallet: s.loadAddress().toString(),
-    };
-    if (op === 0x111) return {
-      type: 'LockCreationFailed',
-      lock_id: Number(s.loadUintBig(64)),
-      creator: s.loadAddress().toString(),
-      jetton: s.loadAddress().toString(),
-      amount: s.loadCoins().toString(),
-    };
-    if (op === 0x112) return {
-      type: 'CreateBounced',
-      lock_id: Number(s.loadUintBig(64)),
-      amount: s.loadCoins().toString(),
-    };
-    if (op === 0x115) return {
-      type: 'RefundRequired',
-      creator: s.loadAddress().toString(),
-      jetton: s.loadAddress().toString(),
-      amount: s.loadCoins().toString(),
-    };
-
-    // ── Wallet events (v4.1.0) ──────────────────────────────────────────
-    if (op === 0x124) return {
-      type: 'LockFunded',
-      lock_id: Number(s.loadUintBig(64)),
-      amount: s.loadCoins().toString(),
-    };
-    if (op === 0x125) return {
-      type: 'Claimed',
-      lock_id: Number(s.loadUintBig(64)),
-      amount: s.loadCoins().toString(),
-      beneficiary: s.loadAddress().toString(),
-      beneficiary_wallet: s.loadAddress().toString(),
-    };
-    if (op === 0x126) return {
-      type: 'ClaimBounced',
-      lock_id: Number(s.loadUintBig(64)),
-      amount: s.loadCoins().toString(),
-    };
+    if (op === 0x106) return { type: 'TonFeeCollected', lock_id: Number(s.loadUintBig(64)), amount: s.loadCoins().toString() };
+    if (op === 0x107) return { type: 'FeesWithdrawn', query_id: Number(s.loadUintBig(64)), jetton_master: s.loadAddress().toString(), amount: s.loadCoins().toString(), destination: s.loadAddress().toString() };
+    if (op === 0x109) return { type: 'JettonWalletSet', jetton_master: s.loadAddress().toString(), jetton_wallet: s.loadAddress().toString() };
+    if (op === 0x111) return { type: 'LockCreationFailed', lock_id: Number(s.loadUintBig(64)), creator: s.loadAddress().toString(), jetton: s.loadAddress().toString(), amount: s.loadCoins().toString() };
+    if (op === 0x112) return { type: 'CreateBounced', lock_id: Number(s.loadUintBig(64)), amount: s.loadCoins().toString() };
+    if (op === 0x115) return { type: 'RefundRequired', creator: s.loadAddress().toString(), jetton: s.loadAddress().toString(), amount: s.loadCoins().toString() };
+    if (op === 0x124) return { type: 'LockFunded', lock_id: Number(s.loadUintBig(64)), amount: s.loadCoins().toString() };
+    if (op === 0x125) return { type: 'Claimed', lock_id: Number(s.loadUintBig(64)), amount: s.loadCoins().toString(), beneficiary: s.loadAddress().toString(), beneficiary_wallet: s.loadAddress().toString() };
+    if (op === 0x126) return { type: 'ClaimBounced', lock_id: Number(s.loadUintBig(64)), amount: s.loadCoins().toString() };
 
     return null;
   } catch (e) {
@@ -104,55 +53,55 @@ const seen = new Set();
 const eventKey = (addr, lt, type) => addr + ':' + lt + ':' + type;
 
 async function pollFactory() {
+  if (!FACTORY_ADDRESS) { console.error('FACTORY_ADDRESS not set'); return; }
   const cursor = await db.getCursor();
-  const txs = await client.getTransactions(Address.parse(FACTORY_ADDRESS), { limit: 20 });
+  const txs = await client.getTransactions(Address.parse(FACTORY_ADDRESS), { limit: 30 });
   let maxLt = cursor.lt;
+
   for (const tx of txs.slice().reverse()) {
-    const lt = BigInt(tx.lt);
-    if (lt <= cursor.lt) continue;
-    if (lt > maxLt) maxLt = lt;
+    try {
+      const lt = BigInt(tx.lt);
+      if (lt <= cursor.lt) continue;
+      if (lt > maxLt) maxLt = lt;
 
-    // Основной путь: вытащить параметры лока из StateInit child-кошелька,
-    // который фабрика деплоит в этой же транзакции. Эти данные — источник
-    // истины, они не зависят от того, что именно попало в event-log.
-    let child = null;
-    let initMeta = null;
-    for (const msg of tx.outMessages.values()) {
-      try {
-        if (msg.info.type === 'internal' && msg.init && msg.info.dest) {
-          child = msg.info.dest.toString();
-          const d = msg.init.data.beginParse();
-          initMeta = {
-            lock_id:       Number(d.loadUintBig(64)),
-            factory:       d.loadAddress().toString(),
-            jetton_master: d.loadAddress().toString(),
-            beneficiary:   d.loadAddress().toString(),
-            creator:       d.loadAddress().toString(),
-            amount:        d.loadCoins().toString(),
-            unlock_at:     Number(d.loadUintBig(64)),
-          };
-        }
-      } catch (e) {
-        console.error('init parse skip:', e.message);
+      let created = null;
+      let child = null;
+      let unlockFromPayload = 0;
+
+      for (const msg of tx.outMessages.values()) {
+        try {
+          if (msg.info.type === 'external-out' && msg.body) {
+            const ev = parseEvent(msg.body);
+            if (ev && ev.type === 'LockCreated') created = ev;
+          } else if (msg.info.type === 'internal' && msg.init && msg.info.dest) {
+            child = msg.info.dest.toString();
+          }
+        } catch (e) { console.error('msg skip:', e.message); }
       }
-    }
 
-    if (initMeta && child) {
-      const rec = { ...initMeta, type: 'LockCreated' };
-      await db.insertLock({
-        ...rec,
-        jetton_master: rec.jetton_master,
-        lockup_wallet: child,
-        factory: FACTORY_ADDRESS,
-      });
-      await db.insertEvent({
-        lock_id: rec.lock_id,
-        event_type: 'LockCreated',
-        event_data: rec,
-        tx_hash: eventKey(FACTORY_ADDRESS, tx.lt, 'LockCreated'),
-      });
-      console.log('Indexed LockCreated #' + rec.lock_id, '->', child);
-    }
+      try {
+        const inMsg = tx.inMessage;
+        if (inMsg && inMsg.info.type === 'internal' && inMsg.body) {
+          const s = inMsg.body.beginParse();
+          if (s.remainingBits >= 32 && s.preloadUint(32) === 0x7362d09c) {
+            s.loadUint(32); s.loadUint(64); s.loadCoins(); s.loadAddress();
+            const fp = s.loadBit() ? s.loadRef().beginParse() : s;
+            if (fp.remainingBits >= 32 && fp.preloadUint(32) === 0x1) {
+              fp.loadUint(32); fp.loadUint(64);
+              fp.loadAddress(); fp.loadAddress();
+              unlockFromPayload = Number(fp.loadUintBig(64));
+            }
+          }
+        }
+      } catch (e) { console.error('payload skip:', e.message); }
+
+      if (created && child) {
+        const rec = { ...created, unlock_at: created.unlock_at || unlockFromPayload };
+        await db.insertLock({ ...rec, jetton_master: rec.jetton, lockup_wallet: child, factory: FACTORY_ADDRESS });
+        await db.insertEvent({ lock_id: rec.lock_id, event_type: 'LockCreated', event_data: rec, tx_hash: eventKey(FACTORY_ADDRESS, tx.lt, 'LockCreated') });
+        console.log('Indexed LockCreated #' + rec.lock_id, '->', child, 'unlock_at:', rec.unlock_at);
+      }
+    } catch (e) { console.error('tx skip:', e.message); }
   }
   if (maxLt > cursor.lt) await db.setCursor(maxLt, null);
 }
