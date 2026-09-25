@@ -93,7 +93,7 @@ const CLAIM_FORWARD: Int = ton("0.01");
 /// Non-empty forward payload. Some TEP-74 implementations (e.g. COGNIQ)
 /// enforce `forward_payload.bits() >= 1` and revert with exit code 708 on
 /// an empty slice. A single zero bit is the minimal valid payload.
-const EMPTY_FORWARD_PAYLOAD: Slice = beginCell().storeBit(false).endCell().asSlice();
+const EMPTY_FORWARD_PAYLOAD: Cell = beginCell().storeBit(false).endCell();
 
 // ─── Contract ──────────────────────────────────────────────────────────────
 
@@ -200,7 +200,7 @@ contract LockupWallet {
                     response_destination: myAddress(),
                     custom_payload: null,
                     forward_ton_amount: CLAIM_FORWARD,
-                    forward_payload: EMPTY_FORWARD_PAYLOAD
+                    forward_payload: EMPTY_FORWARD_PAYLOAD.asSlice()
                 }.toCell()
             });
 
