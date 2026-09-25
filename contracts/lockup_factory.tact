@@ -95,12 +95,6 @@ message(0x26) SetFeeTon {
     fee_ton: Int as coins;
 }
 
-/// Standard TEP-74 Excess Message (returned by Jetton Wallet after transfer).
-/// Used to prevent Exit Code 130 when receiving gas refunds internally.
-message(0xd53276db) JettonExcesses {
-    query_id: Int as uint64;
-}
-
 
 // ─── Events ────────────────────────────────────────────────────────────────
 
