@@ -139,7 +139,7 @@ async function pollWallets() {
           await db.insertEvent({ lock_id: ev.lock_id || 0, event_type: ev.type, event_data: ev, tx_hash: key });
           if (ev.type === 'Claimed') await db.markClaimed(ev.lock_id, ev.amount);
           if (ev.type === 'Extended') await db.markExtended(ev.lock_id, ev.new_unlock_at);
-          if (ev.type === 'LockFunded') await db.markFunded && db.markFunded(ev.lock_id);
+          if (ev.type === 'LockFunded') await db.markFunded(ev.lock_id);
           console.log('Indexed', ev.type, '#' + (ev.lock_id || 0));
         }
       }
