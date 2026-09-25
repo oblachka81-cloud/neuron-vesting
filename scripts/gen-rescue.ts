@@ -6,8 +6,8 @@ const TO = Address.parse('UQBniD_M-MTeVqUbWshZrXdQcz0m8lPstG3mQg1AL5KKCGSv');
 const RESERVE_GAS = toNano('0.06');
 const MULTISIG_VALUE = toNano('0.05');
 
-const FACTORIES: [string, string][] = [
-    ['salt4', 'EQAIvqEAQtEnF6JDU0nhGSpZEbE8TlZAilLkLps23WjVps_B'],
+const FACTORIES = [
+  ['salt5', 'EQAxfCrag6xTRqGl-uS4zGUQLcn3CLRcsk4BfGtLlFFrEpyv'], // Новая фабрика
 ];
 
 async function rpc(method: string, params: any, apiKey?: string): Promise<any> {
