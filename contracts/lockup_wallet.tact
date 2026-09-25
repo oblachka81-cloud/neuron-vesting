@@ -199,7 +199,7 @@ contract LockupWallet {
                     response_destination: myAddress(),
                     custom_payload: null,
                     forward_ton_amount: CLAIM_FORWARD,
-                    forward_payload: EMPTY_FORWARD_PAYLOAD.asSlice()
+                    forward_payload: beginCell().storeBit(false).endCell().asSlice()
                 }.toCell()
             });
 
