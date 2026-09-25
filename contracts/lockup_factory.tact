@@ -95,6 +95,13 @@ message(0x26) SetFeeTon {
     fee_ton: Int as coins;
 }
 
+/// Standard TEP-74 Excess Message (returned by Jetton Wallet after transfer).
+/// Used to prevent Exit Code 130 when receiving gas refunds internally.
+message(0xd53276db) JettonExcesses {
+    query_id: Int as uint64;
+}
+
+
 // ─── Events ────────────────────────────────────────────────────────────────
 
 /// A lock was requested. Final confirmation requires either the child
@@ -233,6 +240,14 @@ contract LockupFactory {
         self.fee_ton = fee_ton;
         self.ton_fees = 0;
     }
+
+        /// Ignore Jetton Transfer Excess messages (gas refunds from internal transfers).
+        /// Without this handler, receiving an excess causes exit code 130 and aborts state cleanup.
+         receive(msg: JettonExcesses) {
+        // No-op: We don't need to track completion here explicitly 
+        // as the state was already updated in TakeWalletAddress.
+        // This handler exists solely to prevent Exit Code 130 crashes.
+     }
 
     // ═══════════════════════════════════════════════════════════════════
     // Treasury: whitelist management
