@@ -3,12 +3,14 @@
     {
       "name": "LockupFactory",
       "path": "./contracts/lockup_factory.tact",
-      "output": "./build/"
+      "output": "./build/",
+      "options": { "external": true }
     },
     {
       "name": "LockupWallet",
       "path": "./contracts/lockup_wallet.tact",
-      "output": "./build/"
+      "output": "./build/",
+      "options": { "external": true }
     }
   ]
 }
