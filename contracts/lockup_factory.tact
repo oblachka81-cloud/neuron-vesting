@@ -445,7 +445,7 @@ contract LockupFactory {
             body: JettonTransfer{
                 query_id: qid,
                 amount: amountOpt!!,
-                destination: msg.wallet_address,
+                destination: child!!,
                 response_destination: myAddress(),
                 custom_payload: null,
                 forward_ton_amount: TRANSFER_FORWARD,
