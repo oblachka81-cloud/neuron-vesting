@@ -58,9 +58,9 @@ function lockCard(l: Lock) {
     const claimBtn = isBen
       ? `<button class="btn-claim" data-claim data-lock-id="${l.lock_id}" data-wallet="${l.lockup_wallet}">Claim</button>`
       : `<span class="hint" style="margin-left:8px">(claim for beneficiary only)</span>`;
-    status = `⏰ <span data-timer="${l.unlock_at}" class="timer">ready</span>${claimBtn}`;
+    status = ` <span data-timer="${l.unlock_at}" class="timer">ready</span>${claimBtn}`;
   } else {
-    status = `🔒 unlocks in <span data-timer="${l.unlock_at}" class="timer"></span>`;
+    status = ` unlocks in <span data-timer="${l.unlock_at}" class="timer"></span>`;
   }
   const ms = l.jetton_master.slice(0, 6) + '...' + l.jetton_master.slice(-4);
   return `<div class="lock-card">
@@ -109,7 +109,7 @@ async function onClaim(_lockId: string, wallet: string) {
     alert('✅ Claim sent. Refreshing in a few seconds.');
     setTimeout(refreshLocks, 5000);
   } catch (e: any) {
-    alert(' ' + (e.message || 'Cancelled'));
+    alert('❌ ' + (e.message || 'Cancelled'));
   }
 }
 
@@ -180,6 +180,7 @@ async function jettonIcon(master: string): Promise<string | null> {
   } catch { return null; }
 }
 
+// ── on-chain check: does factory know this master? ───────────────────────
 function stackNum(e: any): bigint {
   const s = String(Array.isArray(e) ? e[1] : e);
   if (s.startsWith('-0x')) return -BigInt('0x' + s.slice(3));
@@ -229,20 +230,14 @@ async function refreshWhitelist() {
           </span>
         </div>
         <div class="lock-foot"><code>${x.jetton_master}</code> ·
-          <a href="${EXPLORER(x.jetton_master)}" target="_blank">explorer </a></div>
+          <a href="${EXPLORER(x.jetton_master)}" target="_blank">explorer ↗</a></div>
       </div>`);
     }
     list.innerHTML = rows.join('');
     const imgs = Array.from(list.querySelectorAll('img[data-icon]')) as HTMLImageElement[];
     for (const img of imgs) {
       const src = await jettonIcon(img.dataset.icon!);
-      if (src) {
-        img.src = src;
-      } else {
-        // Fallback: золотой кружок, если иконки нет
-        img.style.background = 'linear-gradient(135deg, #caa64e, #8a6a2a)';
-        img.style.border = '1px solid rgba(255,255,255,0.2)';
-      }
+      if (src) img.src = src; else img.style.display = 'none';
       await new Promise((r2) => setTimeout(r2, 300));
     }
   } catch (e: any) {
@@ -299,14 +294,9 @@ async function refreshVaults() {
     } else {
       const rows = await Promise.all(j.summary.by_jetton.map(async (x: any) => {
         const iconSrc = await jettonIcon(x.jetton_master);
-        // Если иконки нет, рисуем золотой кружок
-        const iconHtml = iconSrc 
-          ? `<img src="${iconSrc}" width="24" height="24" style="border-radius:50%; margin-right:8px;" />` 
-          : `<div style="width:24px;height:24px;border-radius:50%;background:linear-gradient(135deg,#caa64e,#8a6a2a);margin-right:8px;border:1px solid rgba(255,255,255,0.2);"></div>`;
-        
         return `
           <div class="jetton-row" style="cursor:pointer;" onclick="window.__nv.showJettonDetails('${x.jetton_master}')">
-            ${iconHtml}
+            ${iconSrc ? `<img src="${iconSrc}" width="24" height="24" style="border-radius:50%; margin-right:8px;" />` : ''}
             <span class="jetton-addr">${x.jetton_master.slice(0, 6)}...${x.jetton_master.slice(-4)}</span>
             <span class="jetton-tvl">${formatCoins(x.tvl_nano)}</span>
             <span class="jetton-count">${x.locks} locks</span>
@@ -334,10 +324,6 @@ async function showJettonDetails(master: string) {
     const j = await r.json();
     const iconSrc = await jettonIcon(master);
     
-    const iconHtml = iconSrc 
-      ? `<img src="${iconSrc}" width="40" height="40" style="border-radius:50%; background:#222;" />` 
-      : `<div style="width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,#caa64e,#8a6a2a);border:1px solid rgba(255,255,255,0.2);"></div>`;
-
     const locksHtml = j.locks.map((l: any) => {
       const now = Math.floor(Date.now() / 1000);
       const status = l.claimed_amount >= l.amount ? '✅ claimed' :
@@ -367,7 +353,7 @@ async function showJettonDetails(master: string) {
     
     content.innerHTML = `
       <div style="display:flex; align-items:center; gap:12px; margin-bottom:20px;">
-        ${iconHtml}
+        ${iconSrc ? `<img src="${iconSrc}" width="40" height="40" style="border-radius:50%; background:#222;" />` : ''}
         <div>
           <div style="font-family:monospace; font-size:12px; color:#888;">${master}</div>
           <div style="font-size:14px; color:#4ade80;">${j.locks.length} locks</div>
@@ -385,7 +371,7 @@ async function showJettonDetails(master: string) {
   modal.onclick = (e) => { if (e.target === modal) modal.style.display = 'none'; };
 }
 
-// Expose ALL functions
+// Expose ALL functions (ЧИСТЫЙ ЭКСПОРТ - без дубликатов)
 (window as any).__nv = { 
   refreshLocks, 
   refreshApps, 
@@ -394,7 +380,7 @@ async function showJettonDetails(master: string) {
   showJettonDetails 
 };
 
-// dynamic pill
+// dynamic pill: reflects on-chain state of COGNIQ in new factory
 (async () => {
   const el = document.getElementById('pill-wl');
   if (!el) return;
