@@ -154,7 +154,6 @@ admin: ${d.revoked ? '✅ zero (revoked)' : '⚠️ ' + d.admin.toString()}</pre
         <button class="gray" onclick="navigator.clipboard.writeText('${m.body_base64}')">Copy Body</button>
         <a href="https://multisig.ton.org" target="_blank" rel="noopener"><button>Open multisig.ton.org</button></a>
       `;
-      loadQueue();
     } catch (e: any) {
       box.innerHTML = `<p class="hint err">Approve failed: ${e.message}</p>`;
     }
