@@ -14,17 +14,17 @@ function getTonClient() {
   }
   return _tonClient;
 }
+
 // ===== Price Cache (update every 5 mins) =====
-let priceCache = { price: 0.001286, updated: 0 }; // Fallback price
+let priceCache = { price: 0.001286, updated: 0 };
 
 async function getCogniqPrice() {
   const now = Date.now();
-  if (now - priceCache.updated < 300000) return priceCache.price; // 5 min cache
-  
+  if (now - priceCache.updated < 300000) return priceCache.price;
   try {
     const res = await fetch('https://api.ston.fi/v1/assets');
     const data = await res.json();
-    const asset = data.asset_list.find(a => 
+    const asset = data.asset_list.find(a =>
       a.contract_address === 'EQDOjRZ5rbSnBBvhsv4g0JNN67p89617_2pNc_AO1dTEkaNg'
     );
     if (asset && asset.dex_price_usd) {
@@ -36,7 +36,7 @@ async function getCogniqPrice() {
   return priceCache.price;
 }
 
-// ===== jetton icon resolver (server-side: no CORS problems, toncenter key used) =====
+// ===== jetton icon resolver =====
 const iconCache = new Map();
 
 function epFor(addr) {
@@ -62,7 +62,6 @@ async function getJettonIcon(master) {
 
   let addr = master;
   try {
-    const { Address } = require('@ton/core');
     addr = Address.parse(master).toString({ urlSafe: true, bounceable: true });
   } catch (_) {}
 
@@ -123,8 +122,8 @@ async function addRoutes(req, res) {
       const summary = await db.getPublicVaultsSummary();
       const price = await getCogniqPrice();
       return json(res, 200, { summary, price_usd: price });
-    } catch (e) { 
-      return json(res, 500, { error: e.message }); 
+    } catch (e) {
+      return json(res, 500, { error: e.message });
     }
   }
 
@@ -134,8 +133,8 @@ async function addRoutes(req, res) {
     try {
       const locks = await db.getLocksByJetton(master);
       return json(res, 200, { locks });
-    } catch (e) { 
-      return json(res, 500, { error: e.message }); 
+    } catch (e) {
+      return json(res, 500, { error: e.message });
     }
   }
 
@@ -153,58 +152,23 @@ async function addRoutes(req, res) {
   }
 
   // ---- applicant ----
-  if (path === '/api/admin/applications/approve' && req.method === 'POST') {
-  const s = await auth.requireAdmin(req, res); if (!s) return;
-  try {
-    const body = JSON.parse(await readBody(req));
-    const app = await db.getApplication(body.id);
-    if (!app) return json(res, 404, { error: 'application not found' });
-
-    // 1. DB approve + whitelist upsert
-    await db.decideApplication(body.id, 'approved', body.reason || null, 'admin', body.due_diligence || {});
-    await db.upsertWhitelist({
-      jetton_master: app.jetton_master,
-      name: body.name || null,
-      symbol: body.symbol || null,
-      description: body.description || null,
-      applicant: app.applicant,
-      metadata: body.metadata || {},
-    });
-
-    // 2. Prepare on-chain SetJettonWallet body for multisig
-    const FACTORY = Address.parse(
-      process.env.FACTORY_ADDRESS
-        || 'EQBAbjNhuYAfWcZ6cnYXHCNhwOf1VH_OBNfkiAzEPvf7S6iE'
-    );
-    const master = Address.parse(app.jetton_master);
-    const client = getTonClient();
-
-    const res1 = await client.runMethod(master, 'get_wallet_address', [
-      { type: 'slice', cell: beginCell().storeAddress(FACTORY).endCell() },
-    ]);
-    const factoryJW = res1.stack.readCell().beginParse().loadAddress();
-
-    const qid = BigInt(Date.now());
-    const txBody = beginCell()
-      .storeUint(0x21, 32)
-      .storeUint(qid, 64)
-      .storeAddress(master)
-      .storeAddress(factoryJW)
-      .endCell();
-
-    return json(res, 200, {
-      ok: true,
-      note: 'Sign on-chain via multisig.ton.org (2-of-3)',
-      multisig: {
-        target: FACTORY.toString(),
-        value: '0.1',
-        query_id: qid.toString(),
-        factory_jetton_wallet: factoryJW.toString(),
-        body_base64: txBody.toBoc().toString('base64'),
-      },
-    });
-  } catch (e) { return json(res, 500, { error: e.message }); }
-}
+  if (path === '/api/applications' && req.method === 'POST') {
+    try {
+      const body = JSON.parse(await readBody(req));
+      if (!body.jetton_master || !body.applicant) {
+        return json(res, 400, { error: 'jetton_master and applicant required' });
+      }
+      const row = await db.insertApplication({
+        jetton_master: body.jetton_master,
+        applicant: body.applicant,
+        telegram_id: body.telegram_id || null,
+        applicant_name: body.applicant_name || null,
+        project_url: body.project_url || null,
+        notes: body.notes || null,
+      });
+      return json(res, 201, { application: row });
+    } catch (e) { return json(res, 500, { error: e.message }); }
+  }
 
   if (path.startsWith('/api/applications/status/') && req.method === 'GET') {
     const id = parseInt(path.split('/').pop(), 10);
@@ -251,6 +215,8 @@ async function addRoutes(req, res) {
       const body = JSON.parse(await readBody(req));
       const app = await db.getApplication(body.id);
       if (!app) return json(res, 404, { error: 'application not found' });
+
+      // 1. DB approve + whitelist upsert
       await db.decideApplication(body.id, 'approved', body.reason || null, 'admin', body.due_diligence || {});
       await db.upsertWhitelist({
         jetton_master: app.jetton_master,
@@ -260,7 +226,39 @@ async function addRoutes(req, res) {
         applicant: app.applicant,
         metadata: body.metadata || {},
       });
-      return json(res, 200, { ok: true, note: 'On-chain SetJettonWallet must be signed from treasury separately.' });
+
+      // 2. Prepare on-chain SetJettonWallet body for multisig
+      const FACTORY = Address.parse(
+        process.env.FACTORY_ADDRESS
+          || 'EQBAbjNhuYAfWcZ6cnYXHCNhwOf1VH_OBNfkiAzEPvf7S6iE'
+      );
+      const master = Address.parse(app.jetton_master);
+      const client = getTonClient();
+
+      const res1 = await client.runMethod(master, 'get_wallet_address', [
+        { type: 'slice', cell: beginCell().storeAddress(FACTORY).endCell() },
+      ]);
+      const factoryJW = res1.stack.readCell().beginParse().loadAddress();
+
+      const qid = BigInt(Date.now());
+      const txBody = beginCell()
+        .storeUint(0x21, 32)
+        .storeUint(qid, 64)
+        .storeAddress(master)
+        .storeAddress(factoryJW)
+        .endCell();
+
+      return json(res, 200, {
+        ok: true,
+        note: 'Sign on-chain via multisig.ton.org (2-of-3)',
+        multisig: {
+          target: FACTORY.toString(),
+          value: '0.1',
+          query_id: qid.toString(),
+          factory_jetton_wallet: factoryJW.toString(),
+          body_base64: txBody.toBoc().toString('base64'),
+        },
+      });
     } catch (e) { return json(res, 500, { error: e.message }); }
   }
 
