@@ -341,24 +341,25 @@ async function refreshVaults() {
     const price = Number(j.price_usd || 0);
     const totalTVL_usd = totalTVL_coins * price;
     const totalLocks = j.summary?.total?.total_locks ?? 0;
+const hasLocks = totalLocks > 0;
 
-    summaryEl.innerHTML = `
-      <div class="vault-stats">
-        <div class="stat-box">
-          <div class="stat-label">Total Value Locked</div>
-          <div class="stat-value">${formatUSD(totalTVL_usd)}</div>
-          <div class="stat-sub">${formatCoins(totalTVL_nano)} tokens</div>
-        </div>
-        <div class="stat-box">
-          <div class="stat-label">Active Locks</div>
-          <div class="stat-value">${totalLocks}</div>
-        </div>
-        <div class="stat-box">
-          <div class="stat-label">Price</div>
-          <div class="stat-value">$${price.toFixed(6)}</div>
-        </div>
-      </div>
-    `;
+summaryEl.innerHTML = `
+  <div class="vault-stats">
+    <div class="stat-box">
+      <div class="stat-label">Total Value Locked</div>
+      <div class="stat-value">${hasLocks ? formatUSD(totalTVL_usd) : '—'}</div>
+      <div class="stat-sub">${hasLocks ? formatCoins(totalTVL_nano) + ' tokens' : 'no active locks'}</div>
+    </div>
+    <div class="stat-box">
+      <div class="stat-label">Active Locks</div>
+      <div class="stat-value">${totalLocks}</div>
+    </div>
+    <div class="stat-box">
+      <div class="stat-label">Price</div>
+      <div class="stat-value">${hasLocks && price > 0 ? '$' + price.toFixed(6) : '—'}</div>
+    </div>
+  </div>
+`;
 
     const byJetton = j.summary?.by_jetton || [];
     if (byJetton.length === 0) {
