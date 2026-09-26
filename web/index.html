@@ -179,6 +179,19 @@
           </div>
         </section>
       </section>
+
+      <!-- Modal: Jetton Details -->
+      <div id="jetton-modal" style="display:none; position:fixed; inset:0; z-index:100; background:rgba(0,0,0,0.85); backdrop-filter:blur(8px);">
+        <div style="position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); width:90%; max-width:600px; max-height:80vh; overflow-y:auto; background:rgba(8,12,22,0.95); border:1px solid rgba(235,232,224,0.5); border-radius:16px; padding:24px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+            <h2 style="margin:0; font-family:'Marcellus',serif; letter-spacing:0.1em; font-size:18px;">JETTON LOCKS</h2>
+            <button id="modal-close" style="background:none; border:none; color:#fff; font-size:24px; cursor:pointer; padding:0; width:32px; height:32px;">×</button>
+          </div>
+          <div id="modal-content">
+            <p class="hint">Loading...</p>
+          </div>
+        </div>
+      </div>
     </main>
 
     <footer>
