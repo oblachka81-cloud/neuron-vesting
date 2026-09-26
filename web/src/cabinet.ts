@@ -136,7 +136,7 @@ async function refreshApps() {
 function statusBadge(s: string) {
   if (s === 'approved') return '✅ approved';
   if (s === 'rejected') return '❌ rejected';
-  return '⏳ pending';
+  return ' pending';
 }
 
 async function onAppSubmit(e: Event) {
@@ -230,7 +230,7 @@ async function refreshWhitelist() {
           </span>
         </div>
         <div class="lock-foot"><code>${x.jetton_master}</code> ·
-          <a href="${EXPLORER(x.jetton_master)}" target="_blank">explorer ↗</a></div>
+          <a href="${EXPLORER(x.jetton_master)}" target="_blank">explorer </a></div>
       </div>`);
     }
     list.innerHTML = rows.join('');
@@ -292,7 +292,6 @@ async function refreshVaults() {
     if (j.summary.by_jetton.length === 0) {
       jettonsEl.innerHTML = '<p class="hint">No active locks yet</p>';
     } else {
-      // Fetch icons in parallel and render clickable rows
       const rows = await Promise.all(j.summary.by_jetton.map(async (x: any) => {
         const iconSrc = await jettonIcon(x.jetton_master);
         return `
@@ -372,7 +371,7 @@ async function showJettonDetails(master: string) {
   modal.onclick = (e) => { if (e.target === modal) modal.style.display = 'none'; };
 }
 
-// Expose ALL functions to tab switcher and global window (ЧИСТЫЙ ЭКСПОРТ)
+// Expose ALL functions
 (window as any).__nv = { 
   refreshLocks, 
   refreshApps, 
