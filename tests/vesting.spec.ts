@@ -693,7 +693,6 @@ describe('NEURON Vesting — v4 (isolated + TEP-89)', () => {
         // Note: getIsPendingClaim() and getAvailableClaimable() would throw here
         // because the contract no longer exists. This is expected v5 behavior.
     });
-});
 
         it('49. second claim while first pending → rejected', async () => {
             const unlockAt = BigInt(blockchain.now! + 100);
