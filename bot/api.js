@@ -2,6 +2,27 @@
 const db = require('./db');
 const auth = require('./auth');
 const { Cell } = require('@ton/core');
+// ===== Price Cache (update every 5 mins) =====
+let priceCache = { price: 0.001286, updated: 0 }; // Fallback price
+
+async function getCogniqPrice() {
+  const now = Date.now();
+  if (now - priceCache.updated < 300000) return priceCache.price; // 5 min cache
+  
+  try {
+    const res = await fetch('https://api.ston.fi/v1/assets');
+    const data = await res.json();
+    const asset = data.asset_list.find(a => 
+      a.contract_address === 'EQDOjRZ5rbSnBBvhsv4g0JNN67p89617_2pNc_AO1dTEkaNg'
+    );
+    if (asset && asset.dex_price_usd) {
+      priceCache = { price: parseFloat(asset.dex_price_usd), updated: now };
+    }
+  } catch (e) {
+    console.warn('STON.fi price fetch failed, using cache', e);
+  }
+  return priceCache.price;
+}
 
 // ===== jetton icon resolver (server-side: no CORS problems, toncenter key used) =====
 const iconCache = new Map();
@@ -95,6 +116,16 @@ async function addRoutes(req, res) {
     if (!wallet) return json(res, 400, { error: 'wallet param required' });
     try { return json(res, 200, { locks: await db.getLocks(wallet) }); }
     catch (e) { return json(res, 500, { error: e.message }); }
+  }
+
+  if (path === '/api/locks/public' && req.method === 'GET') {
+    try {
+      const summary = await db.getPublicVaultsSummary();
+      const price = await getCogniqPrice();
+      return json(res, 200, { summary, price_usd: price });
+    } catch (e) { 
+      return json(res, 500, { error: e.message }); 
+    }
   }
 
   if (path === '/api/whitelist' && req.method === 'GET') {
