@@ -261,11 +261,32 @@ async function listEvents(limit) {
 }
 
 async function close() { await sql.end(); }
+// ==== v5: Public Vaults Summary ====
+async function getPublicVaultsSummary() {
+  const total = await sql`
+    SELECT COUNT(*)::int AS total_locks,
+           COALESCE(SUM(amount - claimed_amount), 0)::bigint AS total_tvl_nano
+    FROM locks 
+    WHERE funded = true AND claimed_amount < amount
+  `;
+  
+  const byJetton = await sql`
+    SELECT jetton_master, 
+           COUNT(*)::int AS locks,
+           COALESCE(SUM(amount - claimed_amount), 0)::bigint AS tvl_nano
+    FROM locks 
+    WHERE funded = true AND claimed_amount < amount
+    GROUP BY jetton_master 
+    ORDER BY tvl_nano DESC
+  `;
+  
+  return { total: total[0], by_jetton: byJetton };
+}
 
 module.exports = {
   migrate, getCursor, setCursor, insertLock, markClaimed, markExtended, markFunded, insertEvent,
   getLocks, getOpenLocks, getStats, close,
   listWhitelist, upsertWhitelist, removeWhitelist,
   listApplications, getApplication, getApplicationByMaster, insertApplication, decideApplication,
-  createSession, getSession, deleteSession, purgeExpiredSessions, listEvents,
+  createSession, getSession, deleteSession, purgeExpiredSessions, listEvents, getPublicVaultsSummary,
 };
