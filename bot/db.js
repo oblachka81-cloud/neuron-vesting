@@ -115,7 +115,7 @@ async function setCursor(lt, hash) {
 async function insertLock(l) {
   const amount = big(l.amount);
   const fee = (amount * 50n) / 10000n;
-  await sql`
+  const inserted = await sql`
     INSERT INTO locks (lock_id, creator, beneficiary, jetton_master, amount, unlock_at, lockup_wallet, factory, fee_jetton)
     VALUES (
       ${String(l.lock_id)},
@@ -126,10 +126,15 @@ async function insertLock(l) {
       ${normAddr(l.lockup_wallet)},
       ${normAddr(l.factory)},
       ${fee.toString()}
-    ) ON CONFLICT (lock_id) DO NOTHING`;
-  await sql`UPDATE factory_state
-            SET ton_fees_accumulated = ton_fees_accumulated + 1000000000, updated_at = NOW()
-            WHERE id = 1`;
+    ) ON CONFLICT (lock_id) DO NOTHING
+    RETURNING lock_id`;
+
+  // Прибавляем TON-fee только когда лок реально вставлен (не дубликат)
+  if (inserted.length > 0) {
+    await sql`UPDATE factory_state
+              SET ton_fees_accumulated = ton_fees_accumulated + 1000000000, updated_at = NOW()
+              WHERE id = 1`;
+  }
 }
 
 async function markClaimed(lockId, amount) {
