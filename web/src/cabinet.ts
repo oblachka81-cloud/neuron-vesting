@@ -126,7 +126,7 @@ async function onClaim(_lockId: string, wallet: string) {
       messages: [
         {
           address: walletAddress,
-          amount: toNano('0.15').toString(),
+          amount: toNano('0.05').toString(),
           payload: body.toBoc().toString('base64'),
         },
       ],
