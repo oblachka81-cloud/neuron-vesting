@@ -97,10 +97,11 @@ async function onClaim(_lockId: string, wallet: string) {
   if (!tcRef || !currentWallet) return;
   try {
     const body = buildClaimBody(BigInt(Date.now()));
+    const walletAddress = Address.parse(wallet).toString({ urlSafe: true });
     await tcRef.sendTransaction({
       validUntil: Math.floor(Date.now() / 1000) + 300,
       messages: [{
-        address: wallet,
+        address: walletAddress,
         amount: toNano('0.2').toString(),
         payload: body.toBoc().toString('base64'),
       }],
