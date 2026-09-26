@@ -102,7 +102,7 @@ async function onClaim(_lockId: string, wallet: string) {
       validUntil: Math.floor(Date.now() / 1000) + 300,
       messages: [{
         address: walletAddress,
-        amount: toNano('0.2').toString(),
+        amount: toNano('0.05').toString(),
         payload: body.toBoc().toString('base64'),
       }],
     });
