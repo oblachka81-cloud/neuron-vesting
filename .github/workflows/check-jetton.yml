@@ -1,0 +1,25 @@
+name: Check Jetton Whitelist
+
+on:
+  workflow_dispatch:
+    inputs:
+      jetton_master:
+        description: 'Jetton master address'
+        required: true
+        default: 'EQDOjRZ5rbSnBBvhsv4g0JNN67p89617_2pNc_AO1dTEkaNg'
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci --no-audit --no-fund
+      - run: npm run build
+      - name: Run add-jetton
+        env:
+          TONCENTER_API_KEY: ${{ secrets.TONCENTER_API_KEY }}
+          FACTORY_ADDRESS: EQBAbjNhuYAfWcZ6cnYXHCNhwOf1VH_OBNfkiAzEPvf7S6iE
+        run: npx tsx scripts/add-jetton.ts ${{ github.event.inputs.jetton_master }}
