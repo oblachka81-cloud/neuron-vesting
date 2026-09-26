@@ -283,10 +283,19 @@ async function getPublicVaultsSummary() {
   return { total: total[0], by_jetton: byJetton };
 }
 
+async function getLocksByJetton(jettonMaster) {
+  return await sql`
+    SELECT lock_id, amount, claimed_amount, unlock_at, lockup_wallet, creator, beneficiary, funded
+    FROM locks 
+    WHERE jetton_master = ${normAddr(jettonMaster)}
+    AND funded = true
+    ORDER BY lock_id DESC`;
+}
+
 module.exports = {
   migrate, getCursor, setCursor, insertLock, markClaimed, markExtended, markFunded, insertEvent,
   getLocks, getOpenLocks, getStats, close,
   listWhitelist, upsertWhitelist, removeWhitelist,
   listApplications, getApplication, getApplicationByMaster, insertApplication, decideApplication,
-  createSession, getSession, deleteSession, purgeExpiredSessions, listEvents, getPublicVaultsSummary,
+  createSession, getSession, deleteSession, purgeExpiredSessions, listEvents, getPublicVaultsSummary, getLocksByJetton,
 };
