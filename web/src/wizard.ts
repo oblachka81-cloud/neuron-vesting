@@ -71,9 +71,9 @@ export function mountWizard(tc: TonConnectUI) {
       const queryId = BigInt(Date.now());
 
       const { feeBps, feeTon } = await getFactoryFees();
-      const gasBuffer = toNano('0.6');
+      const gasBuffer = toNano('0.15');
       const forwardTon = feeTon + gasBuffer;
-      const outerValue = forwardTon + toNano('0.2');
+      const outerValue = forwardTon + toNano('0.05');
 
       setStatus(`Fees: ${feeBps / 100}% + ${Number(feeTon) / 1e9} TON. Looking up jetton wallet...`);
       const userJettonWallet = await getUserJettonWallet(jettonMaster, creator);
