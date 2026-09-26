@@ -245,8 +245,68 @@ async function refreshWhitelist() {
   }
 }
 
+// ── Vaults Tab Logic ───────────────────────────────────────────────────────
+
+function formatUSD(n: number): string {
+  if (n >= 1e9) return `$${(n / 1e9).toFixed(2)}B`;
+  if (n >= 1e6) return `$${(n / 1e6).toFixed(2)}M`;
+  if (n >= 1e3) return `$${(n / 1e3).toFixed(2)}K`;
+  return `$${n.toFixed(2)}`;
+}
+
+function formatCoins(nano: bigint | string): string {
+  return (BigInt(nano) / 10n ** 9n).toLocaleString('en-US');
+}
+
+async function refreshVaults() {
+  const summaryEl = document.getElementById('vaults-summary')!;
+  const jettonsEl = document.getElementById('vaults-jettons')!;
+  
+  try {
+    const r = await fetch(`${API_URL}/api/locks/public`);
+    const j = await r.json();
+    
+    const totalTVL_nano = BigInt(j.summary.total.total_tvl_nano);
+    const totalTVL_coins = Number(totalTVL_nano / 10n ** 9n);
+    const totalTVL_usd = totalTVL_coins * j.price_usd;
+    const totalLocks = j.summary.total.total_locks;
+
+    summaryEl.innerHTML = `
+      <div class="vault-stats">
+        <div class="stat-box">
+          <div class="stat-label">Total Value Locked</div>
+          <div class="stat-value">${formatUSD(totalTVL_usd)}</div>
+          <div class="stat-sub">${formatCoins(totalTVL_nano)} COGNIQ</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-label">Active Locks</div>
+          <div class="stat-value">${totalLocks}</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-label">COGNIQ Price</div>
+          <div class="stat-value">$${j.price_usd.toFixed(6)}</div>
+        </div>
+      </div>
+    `;
+
+    if (j.summary.by_jetton.length === 0) {
+      jettonsEl.innerHTML = '<p class="hint">No active locks yet</p>';
+    } else {
+      jettonsEl.innerHTML = j.summary.by_jetton.map((x: any) => `
+        <div class="jetton-row">
+          <span class="jetton-addr">${x.jetton_master.slice(0, 6)}...${x.jetton_master.slice(-4)}</span>
+          <span class="jetton-tvl">${formatCoins(x.tvl_nano)}</span>
+          <span class="jetton-count">${x.locks} locks</span>
+        </div>
+      `).join('');
+    }
+  } catch (e: any) {
+    summaryEl.innerHTML = `<p class="hint" style="color:#ff6b6b">Error: ${e.message}</p>`;
+  }
+}
+
 // expose to tab switcher
-(window as any).__nv = { refreshLocks, refreshApps, refreshWhitelist };
+(window as any).__nv = { refreshLocks, refreshApps, refreshWhitelist, refreshVaults };
 
 // dynamic pill: reflects on-chain state of COGNIQ in new factory
 (async () => {
