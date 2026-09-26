@@ -128,6 +128,17 @@ async function addRoutes(req, res) {
     }
   }
 
+  if (path === '/api/locks/by-jetton' && req.method === 'GET') {
+    const master = url.searchParams.get('master');
+    if (!master) return json(res, 400, { error: 'master param required' });
+    try {
+      const locks = await db.getLocksByJetton(master);
+      return json(res, 200, { locks });
+    } catch (e) { 
+      return json(res, 500, { error: e.message }); 
+    }
+  }
+
   if (path === '/api/whitelist' && req.method === 'GET') {
     try { return json(res, 200, { whitelist: await db.listWhitelist() }); }
     catch (e) { return json(res, 500, { error: e.message }); }
