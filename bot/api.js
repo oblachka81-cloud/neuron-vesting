@@ -47,41 +47,29 @@ function readSnake(cs) {
 async function getJettonIcon(master) {
   const hit = iconCache.get(master);
   if (hit && Date.now() - hit.t < 3600000) return hit.image;
-  const res = await fetch(epFor(master), {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(process.env.TONCENTER_API_KEY ? { 'X-API-Key': process.env.TONCENTER_API_KEY } : {}),
-    },
-    body: JSON.stringify({
-      id: '1', jsonrpc: '2.0', method: 'runGetMethod',
-      params: { address: master, method: 'get_jetton_data', stack: [] },
-    }),
-  });
-  const j = await res.json();
-  if (!j.ok) throw new Error(j.error || 'toncenter error');
-  const contentCell = Cell.fromBoc(Buffer.from(j.result.stack[3][1].bytes, 'base64'))[0];
-  const cs = contentCell.beginParse();
-  const prefix = cs.loadUint(8);
-  if (prefix !== 0) throw new Error('on-chain metadata (prefix ' + prefix + ') not supported yet');
-  const raw = readSnake(cs);
-  const m = raw.match(/(https?:\/\/|ipfs:\/\/)[^\s\u0000-\u001F"'<>]+/);
-  if (!m) throw new Error('no URI in jetton content');
-  let uri = m[0];
-  if (uri.startsWith('ipfs://')) uri = 'https://ipfs.io/ipfs/' + uri.slice(7);
-  const mres = await fetch(uri);
-  const ctype = (mres.headers.get('content-type') || '').toLowerCase();
-  const text = await mres.text();
-  let image = null;
+
+  let addr = master;
   try {
-    const mj = JSON.parse(text);
-    image = mj.image || mj.image_url || null;
-  } catch {
-    if (ctype.startsWith('image/') || /\.(png|jpe?g|gif|webp|svg)$/i.test(uri)) image = uri;
-    else throw new Error('metadata URI is neither JSON nor image (' + ctype + ')');
+    const { Address } = require('@ton/core');
+    addr = Address.parse(master).toString({ urlSafe: true, bounceable: true });
+  } catch (_) {}
+
+  const r = await fetch('https://tonapi.io/v2/jettons/' + encodeURIComponent(addr), {
+    headers: process.env.TONAPI_KEY
+      ? { Authorization: 'Bearer ' + process.env.TONAPI_KEY }
+      : {},
+  });
+  if (!r.ok) throw new Error('tonapi ' + r.status);
+
+  const j = await r.json();
+  let image = (j.metadata && j.metadata.image) || j.preview || null;
+  if (image && image.startsWith('ipfs://')) {
+    image = 'https://ipfs.io/ipfs/' + image.slice(7);
   }
-  if (image && image.startsWith('ipfs://')) image = 'https://ipfs.io/ipfs/' + image.slice(7);
-  if (image) iconCache.set(master, { t: Date.now(), image });
+  if (!image) throw new Error('no image in metadata');
+
+  iconCache.set(master, { t: Date.now(), image });
+  iconCache.set(addr, { t: Date.now(), image });
   return image;
 }
 
