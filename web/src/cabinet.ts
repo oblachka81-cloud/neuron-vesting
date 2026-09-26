@@ -305,6 +305,130 @@ async function refreshVaults() {
   }
 }
 
+// ── Jetton Details Modal ──────────────────────────────────────────────────
+
+async function showJettonDetails(master: string) {
+  const modal = document.getElementById('jetton-modal')!;
+  const content = document.getElementById('modal-content')!;
+  
+  modal.style.display = 'block';
+  content.innerHTML = '<p class="hint">Loading locks...</p>';
+  
+  try {
+    // Fetch locks
+    const r = await fetch(`${API_URL}/api/locks/by-jetton?master=${encodeURIComponent(master)}`);
+    const j = await r.json();
+    
+    // Fetch icon
+    const iconSrc = await jettonIcon(master);
+    
+    const locksHtml = j.locks.map((l: any) => {
+      const now = Math.floor(Date.now() / 1000);
+      const status = l.claimed_amount >= l.amount ? '✅ claimed' :
+                     l.unlock_at <= now ? '⏰ ready' : '🔒 locked';
+      const amt = (BigInt(l.amount) / 10n ** 9n).toString();
+      const unlockDate = new Date(l.unlock_at * 1000).toLocaleString('en-US', {
+        year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+      });
+      
+      return `
+        <div class="lock-detail-row">
+          <div class="lock-detail-header">
+            <span class="lock-id">#${l.lock_id}</span>
+            <span class="lock-status">${status}</span>
+          </div>
+          <div class="lock-detail-info">
+            <div><b>Amount:</b> ${amt}</div>
+            <div><b>Unlock:</b> ${unlockDate}</div>
+            <div><b>Creator:</b> ${l.creator.slice(0, 6)}...${l.creator.slice(-4)}</div>
+          </div>
+          <div class="lock-detail-footer">
+            <a href="${EXPLORER(l.lockup_wallet)}" target="_blank" class="btn-small">View in Explorer ↗</a>
+          </div>
+        </div>
+      `;
+    }).join('');
+    
+    content.innerHTML = `
+      <div style="display:flex; align-items:center; gap:12px; margin-bottom:20px;">
+        ${iconSrc ? `<img src="${iconSrc}" width="40" height="40" style="border-radius:50%; background:#222;" />` : ''}
+        <div>
+          <div style="font-family:monospace; font-size:12px; color:#888;">${master}</div>
+          <div style="font-size:14px; color:#4ade80;">${j.locks.length} locks</div>
+        </div>
+      </div>
+      <div class="locks-detail-list">
+        ${locksHtml}
+      </div>
+    `;
+  } catch (e: any) {
+    content.innerHTML = `<p class="hint" style="color:#ff6b6b">Error: ${e.message}</p>`;
+  }
+  
+  // Close handler
+  document.getElementById('modal-close')!.onclick = () => {
+    modal.style.display = 'none';
+  };
+  modal.onclick = (e) => {
+    if (e.target === modal) modal.style.display = 'none';
+  };
+}
+
+// Update jetton row to be clickable
+async function refreshVaults() {
+  const summaryEl = document.getElementById('vaults-summary')!;
+  const jettonsEl = document.getElementById('vaults-jettons')!;
+  
+  try {
+    const r = await fetch(`${API_URL}/api/locks/public`);
+    const j = await r.json();
+    
+    const totalTVL_nano = BigInt(j.summary.total.total_tvl_nano);
+    const totalTVL_coins = Number(totalTVL_nano / 10n ** 9n);
+    const totalTVL_usd = totalTVL_coins * j.price_usd;
+    const totalLocks = j.summary.total.total_locks;
+
+    summaryEl.innerHTML = `
+      <div class="vault-stats">
+        <div class="stat-box">
+          <div class="stat-label">Total Value Locked</div>
+          <div class="stat-value">${formatUSD(totalTVL_usd)}</div>
+          <div class="stat-sub">${formatCoins(totalTVL_nano)} COGNIQ</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-label">Active Locks</div>
+          <div class="stat-value">${totalLocks}</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-label">COGNIQ Price</div>
+          <div class="stat-value">$${j.price_usd.toFixed(6)}</div>
+        </div>
+      </div>
+    `;
+
+    if (j.summary.by_jetton.length === 0) {
+      jettonsEl.innerHTML = '<p class="hint">No active locks yet</p>';
+    } else {
+      jettonsEl.innerHTML = await Promise.all(j.summary.by_jetton.map(async (x: any) => {
+        const iconSrc = await jettonIcon(x.jetton_master);
+        return `
+          <div class="jetton-row" style="cursor:pointer;" onclick="(window as any).__nv.showJettonDetails('${x.jetton_master}')">
+            ${iconSrc ? `<img src="${iconSrc}" width="24" height="24" style="border-radius:50%; margin-right:8px;" />` : ''}
+            <span class="jetton-addr">${x.jetton_master.slice(0, 6)}...${x.jetton_master.slice(-4)}</span>
+            <span class="jetton-tvl">${formatCoins(x.tvl_nano)}</span>
+            <span class="jetton-count">${x.locks} locks</span>
+          </div>
+        `;
+      })).then(rows => rows.join(''));
+    }
+  } catch (e: any) {
+    summaryEl.innerHTML = `<p class="hint" style="color:#ff6b6b">Error: ${e.message}</p>`;
+  }
+}
+
+// Expose showJettonDetails
+(window as any).__nv = { refreshLocks, refreshApps, refreshWhitelist, refreshVaults, showJettonDetails };
+
 // expose to tab switcher
 (window as any).__nv = { refreshLocks, refreshApps, refreshWhitelist, refreshVaults };
 
