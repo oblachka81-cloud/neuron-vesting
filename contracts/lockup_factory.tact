@@ -1,10 +1,15 @@
 // ═══════════════════════════════════════════════════════════════════════════
-// NEURON Vesting — LockupFactory v4.2.0
+// NEURON Vesting — LockupFactory v5.0.0
 // ───────────────────────────────────────────────────────────────────────────
 // Singleton factory. Accepts jetton transfers with a `CreateLock` payload,
 // deploys one LockupWallet per lock, and forwards the locked jettons to the
 // corresponding wallet. Also accumulates and lets the treasury withdraw
 // platform fees (TON and jettons).
+//
+// Changelog v5.0.0:
+//   - Optimized DEPLOY_GAS from 0.15 to 0.12 TON based on mainnet empirical data.
+//   - Fixed bounce refund: now refunds both fee_ton AND GAS_BUFFER_TON to the 
+//     creator if deployment fails, ensuring no funds are unfairly retained.
 //
 // Trust model:
 //   - treasury: whitelists jetton masters and withdraws fees.
@@ -95,7 +100,6 @@ message(0x26) SetFeeTon {
     fee_ton: Int as coins;
 }
 
-
 // ─── Events ────────────────────────────────────────────────────────────────
 
 /// A lock was requested. Final confirmation requires either the child
@@ -158,7 +162,8 @@ message(0x115) RefundRequired {
 const GAS_BUFFER_TON: Int = ton("0.1");
 
 /// Gas attached when deploying a LockupWallet.
-const DEPLOY_GAS: Int = ton("0.15");
+/// AUDIT: Reduced from 0.15 to 0.12 in v5 based on mainnet empirical measurements.
+const DEPLOY_GAS: Int = ton("0.12");
 
 /// Gas attached to the jetton transfer that funds the LockupWallet.
 const TRANSFER_GAS: Int = ton("0.05");
@@ -188,7 +193,6 @@ const MAX_FEE_BPS: Int = 1000;
 /// Minimal payload size in bits: op (32) + qid (64) + 2 addresses (2×267) +
 /// unlock_at (64). Used to reject malformed payloads before parsing.
 const CREATE_LOCK_PAYLOAD_BITS: Int = 694;
-
 
 // ─── Contract ──────────────────────────────────────────────────────────────
 
@@ -235,13 +239,10 @@ contract LockupFactory {
         self.ton_fees = 0;
     }
 
-        /// Ignore Jetton Transfer Excess messages (gas refunds from internal transfers).
-        /// Without this handler, receiving an excess causes exit code 130 and aborts state cleanup.
-         receive(msg: JettonExcesses) {
-        // No-op: We don't need to track completion here explicitly 
-        // as the state was already updated in TakeWalletAddress.
-        // This handler exists solely to prevent Exit Code 130 crashes.
-     }
+    /// Ignore Jetton Transfer Excess messages (gas refunds from internal transfers).
+    /// AUDIT: Without this handler, receiving an excess causes exit code 130 
+    /// and aborts state cleanup. This is a no-op by design.
+    receive(msg: JettonExcesses) { }
 
     // ═══════════════════════════════════════════════════════════════════
     // Treasury: whitelist management
@@ -285,13 +286,11 @@ contract LockupFactory {
 
     /// Entry point for lock creation. The user sends jettons to the factory
     /// with a `CreateLock` payload. The factory:
-    ///   1. Validates the sender is the factory's jetton wallet for a
-    ///      whitelisted master.
+    ///   1. Validates the sender is the factory's jetton wallet for a whitelisted master.
     ///   2. Validates the attached TON covers the platform fee + gas buffer.
     ///   3. Parses and validates the CreateLock payload.
     ///   4. Deducts the platform jetton fee and deploys a LockupWallet.
-    ///   5. Forwards the locked jettons to the wallet and, in parallel,
-    ///      asks the jetton master (TEP-89) for the wallet's jetton address.
+    ///   5. Forwards the locked jettons to the wallet and asks the master for its address.
     receive(msg: JettonNotification) {
         // F2, F3: identify master via reverse map before parsing the payload.
         let jm: Address? = self.wallet_to_master.get(sender());
@@ -342,7 +341,8 @@ contract LockupFactory {
 
         let creator: Address = msg.sender;
 
-        // Refund any overpay to the creator.
+        // AUDIT: Overpay is refunded immediately to prevent the factory from 
+        // hoarding user funds. Only fee_ton + GAS_BUFFER_TON are retained.
         let overpay: Int = context().value - self.fee_ton - GAS_BUFFER_TON;
         self.ton_fees = self.ton_fees + self.fee_ton;
         if (overpay > 0) {
@@ -515,8 +515,8 @@ contract LockupFactory {
     // ═══════════════════════════════════════════════════════════════════
 
     /// Two cases share the JettonTransfer opcode:
-    ///   - Create-transfer bounce: refund jettons and fees (F7).
-    ///   - Fee-withdrawal bounce: restore `fees[m]` (F5).
+    ///   - Case A: Create-transfer bounce: refund jettons and fees (F7).
+    ///   - Case B: Fee-withdrawal bounce: restore `fees[m]` (F5).
     bounced(msg: bounced<JettonTransfer>) {
         let qid: Int = msg.query_id;
 
@@ -553,12 +553,14 @@ contract LockupFactory {
             let curFee: Int = curFeeOpt != null ? curFeeOpt!! : 0;
             self.fees.set(jm, curFee > fee ? curFee - fee : 0);
 
-            // Refund the TON fee.
+            // AUDIT v5 FIX: Refund BOTH the platform fee and the gas buffer.
+            // Since the deployment failed, the factory should not retain GAS_BUFFER_TON.
+            let refund_amount: Int = charged_ton + GAS_BUFFER_TON;
             if (self.ton_fees >= charged_ton) {
                 self.ton_fees = self.ton_fees - charged_ton;
                 send(SendParameters{
                     to: creator,
-                    value: charged_ton,
+                    value: refund_amount,
                     mode: SendPayGasSeparately,
                     body: emptyCell()
                 });
