@@ -1,9 +1,16 @@
 // ═══════════════════════════════════════════════════════════════════════════
-// NEURON Vesting — LockupWallet v4.1.0
+// NEURON Vesting — LockupWallet v5.0.0
 // ───────────────────────────────────────────────────────────────────────────
 // One LockupWallet per lock. Holds jettons after the factory forwards them
 // into the wallet's deterministic jetton wallet, enforces the unlock
 // schedule, and releases jettons to the beneficiary on claim.
+//
+// Changelog v5.0.0:
+//   - ADDED: Automatic sweep of all remaining TON balance to beneficiary after
+//     successful claim completion (mode: 128 + 32 + 2).
+//   - ADDED: Contract self-destruct after final claim to reclaim storage deposit.
+//   - This eliminates "dead wallet dust" (~0.3 TON per lock) that accumulated
+//     in v4.1.0.
 //
 // Jetton wallet discovery:
 //   The wallet does not compute its jetton wallet address via StateInit.
@@ -33,6 +40,8 @@
 //       `amount == total_amount` from the discovered jetton wallet
 //   I4. `jetton_wallet` is set at most once (discovery is idempotent)
 //   I5. Claims are atomic: at most one pending claim per wallet
+//   I6. After successful claim completion, all remaining TON balance is
+//       returned to beneficiary and contract self-destructs (no dust left)
 //
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -94,7 +103,7 @@ const CLAIM_FORWARD: Int = ton("0.01");
 /// enforce `forward_payload.bits() >= 1` and revert with exit code 708 on
 /// an empty slice. A single zero bit is the minimal valid payload.
 
-// ─── Contract ──────────────────────────────────────────────────────────────
+// ─── Contract ─────────────────────────────────────────────────────────────
 
 contract LockupWallet {
     // ── Immutable identity ─────────────────────────────────────────────
@@ -109,7 +118,7 @@ contract LockupWallet {
     claimed: Int as coins;
     unlock_at: Int as uint64;
 
-    // ── Discovery & funding state ──────────────────────────────────────
+    // ── Discovery & funding state ─────────────────────────────────────
     /// This wallet's jetton wallet address, resolved via TEP-89.
     jetton_wallet: Address?;
     /// Notification sender observed before discovery completed.
@@ -150,7 +159,7 @@ contract LockupWallet {
 
     // ═══════════════════════════════════════════════════════════════════
     // Discovery
-    // ═══════════════════════════════════════════════════════════════════
+    // ══════════════════════════════════════════════════════════════════
 
     /// Factory-only entry point: kick off TEP-89 discovery.
     receive(msg: StartDiscovery) {
@@ -234,7 +243,7 @@ contract LockupWallet {
 
     // ═══════════════════════════════════════════════════════════════════
     // Funding
-    // ═══════════════════════════════════════════════════════════════════
+    // ══════════════════════════════════════════════════════════════════
 
     /// Accept deposits exclusively from the discovered jetton wallet (I3).
     /// Notifications arriving before discovery are buffered in `fund_sender`
@@ -296,6 +305,19 @@ contract LockupWallet {
 
     /// Jetton wallet's success callback. Resets `pending_claim` so future
     /// claims can proceed.
+    ///
+    /// AUDIT v5.0.0 FIX:
+    /// After successful claim completion (when claimed == total_amount),
+    /// this handler now returns ALL remaining TON balance to the beneficiary
+    /// and self-destructs the contract (mode: 128 + 32 + 2).
+    ///
+    /// Mode breakdown:
+    ///   - 128: Send all remaining balance (not just value field)
+    ///   - 32: Ignore errors (if beneficiary address is invalid, just skip)
+    ///   - 2: Destroy this contract after sending (reclaim storage deposit)
+    ///
+    /// This eliminates the ~0.3 TON "dead dust" that accumulated in v4.1.0
+    /// contracts after claim completion.
     receive(msg: JettonExcesses) {
         let jw: Address? = self.jetton_wallet;
         require(jw != null && sender() == jw!!, "not our wallet"); 
@@ -304,6 +326,17 @@ contract LockupWallet {
             self.pending_claim = false;
             self.pending_amount = 0;
             self.pending_query_id = 0;
+
+            // AUDIT v5: If this was the final claim (all funds claimed),
+            // sweep all remaining TON to beneficiary and self-destruct.
+            if (self.claimed >= self.total_amount) {
+                send(SendParameters{
+                    to: self.beneficiary,
+                    value: 0,  // value=0 with mode:128 sends ALL balance
+                    mode: 128 + 32 + 2,
+                    body: emptyCell()
+                });
+            }
         }
     }
 
