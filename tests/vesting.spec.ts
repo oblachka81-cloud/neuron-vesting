@@ -630,62 +630,70 @@ describe('NEURON Vesting — v4 (isolated + TEP-89)', () => {
 
         // ═══════════════════════════════════════════════════════════════════════
     describe('LockupWallet: happy-path claim + Excesses', () => {
-        it('48. claim after unlock → TakeWalletAddress → Excesses clears pending', async () => {
-            const unlockAt = BigInt(blockchain.now! + 100);
-            const wallet = blockchain.openContract(
-                await LockupWallet.fromInit(
-                    99n,
-                    factory.address,
-                    jettonMaster.address,
-                    beneficiary.address,
-                    user.address,
-                    LOCK_AMOUNT,
-                    unlockAt,
-                ),
-            );
-            await wallet.send(treasury.getSender(), { value: toNano('2') }, null);
+    it('48. claim after unlock → TakeWalletAddress → Excesses clears pending + self-destruct', async () => {
+        const unlockAt = BigInt(blockchain.now! + 100);
+        const wallet = blockchain.openContract(
+            await LockupWallet.fromInit(
+                99n,
+                factory.address,
+                jettonMaster.address,
+                beneficiary.address,
+                user.address,
+                LOCK_AMOUNT,
+                unlockAt,
+            ),
+        );
+        await wallet.send(treasury.getSender(), { value: toNano('2') }, null);
 
-            await wallet.send(jettonMaster.getSender(), { value: toNano('0.1') },
-                makeTakeWalletAddress(0n, fakeJettonWallet.address, wallet.address));
-            expect(await wallet.getJettonWallet()).toEqualAddress(fakeJettonWallet.address);
+        await wallet.send(jettonMaster.getSender(), { value: toNano('0.1') },
+            makeTakeWalletAddress(0n, fakeJettonWallet.address, wallet.address));
+        expect(await wallet.getJettonWallet()).toEqualAddress(fakeJettonWallet.address);
 
-            await wallet.send(fakeJettonWallet.getSender(), { value: toNano('0.1') }, {
-                $$type: 'JettonNotification',
-                query_id: 1n,
-                amount: LOCK_AMOUNT,
-                sender: user.address,
-                forward_payload: beginCell().endCell().asSlice(),
-            });
-            expect(await wallet.getIsFunded()).toEqual(true);
-
-            blockchain.now = Number(unlockAt) + 10;
-
-            const claimQid = 777n;
-            const resClaim = await wallet.send(beneficiary.getSender(), { value: toNano('0.5') }, {
-                $$type: 'Claim', query_id: claimQid, amount: 0n,
-            });
-            expect(resClaim.transactions).toHaveTransaction({
-                from: beneficiary.address, to: wallet.address, success: true,
-            });
-            expect(await wallet.getIsPendingClaim()).toEqual(true);
-            expect(await wallet.getClaimedAmount()).toEqual(0n);
-
-            const benJettonWallet = await blockchain.treasury('benJettonWallet');
-            const resTake = await wallet.send(jettonMaster.getSender(), { value: toNano('0.1') },
-                makeTakeWalletAddress(claimQid, benJettonWallet.address, beneficiary.address));
-            expect(resTake.transactions).toHaveTransaction({
-                from: jettonMaster.address, to: wallet.address, success: true,
-            });
-            expect(await wallet.getClaimedAmount()).toEqual(LOCK_AMOUNT);
-            expect(resTake.transactions).toHaveTransaction({
-                from: wallet.address, to: fakeJettonWallet.address, op: 0x0f8a7ea5,
-            });
-
-            await wallet.send(fakeJettonWallet.getSender(), { value: toNano('0.05') },
-                makeExcesses(claimQid));
-            expect(await wallet.getIsPendingClaim()).toEqual(false);
-            expect(await wallet.getAvailableClaimable()).toEqual(0n);
+        await wallet.send(fakeJettonWallet.getSender(), { value: toNano('0.1') }, {
+            $$type: 'JettonNotification',
+            query_id: 1n,
+            amount: LOCK_AMOUNT,
+            sender: user.address,
+            forward_payload: beginCell().endCell().asSlice(),
         });
+        expect(await wallet.getIsFunded()).toEqual(true);
+
+        blockchain.now = Number(unlockAt) + 10;
+
+        const claimQid = 777n;
+        const resClaim = await wallet.send(beneficiary.getSender(), { value: toNano('0.5') }, {
+            $$type: 'Claim', query_id: claimQid, amount: 0n,
+        });
+        expect(resClaim.transactions).toHaveTransaction({
+            from: beneficiary.address, to: wallet.address, success: true,
+        });
+        expect(await wallet.getIsPendingClaim()).toEqual(true);
+        expect(await wallet.getClaimedAmount()).toEqual(0n);
+
+        const benJettonWallet = await blockchain.treasury('benJettonWallet');
+        const resTake = await wallet.send(jettonMaster.getSender(), { value: toNano('0.1') },
+            makeTakeWalletAddress(claimQid, benJettonWallet.address, beneficiary.address));
+        expect(resTake.transactions).toHaveTransaction({
+            from: jettonMaster.address, to: wallet.address, success: true,
+        });
+        expect(await wallet.getClaimedAmount()).toEqual(LOCK_AMOUNT);
+        expect(resTake.transactions).toHaveTransaction({
+            from: wallet.address, to: fakeJettonWallet.address, op: 0x0f8a7ea5,
+        });
+
+        await wallet.send(fakeJettonWallet.getSender(), { value: toNano('0.05') },
+            makeExcesses(claimQid));
+
+        // AUDIT v5.0.0: After full claim, contract self-destructs (mode: 128+32+2)
+        // Contract is no longer active, so getters will fail.
+        // Instead, verify the contract balance is 0 (self-destructed).
+        const contractState = await blockchain.getContract(wallet.address);
+        expect(contractState.balance).toBe(0n);
+
+        // Note: getIsPendingClaim() and getAvailableClaimable() would throw here
+        // because the contract no longer exists. This is expected v5 behavior.
+    });
+});
 
         it('49. second claim while first pending → rejected', async () => {
             const unlockAt = BigInt(blockchain.now! + 100);
