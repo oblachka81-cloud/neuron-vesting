@@ -1,7 +1,19 @@
 // bot/api.js — REST API: locks, whitelist, applications, admin, jetton icons (v5)
 const db = require('./db');
 const auth = require('./auth');
-const { Cell } = require('@ton/core');
+const { Cell, Address, beginCell } = require('@ton/core');
+const { TonClient } = require('@ton/ton');
+
+let _tonClient = null;
+function getTonClient() {
+  if (!_tonClient) {
+    _tonClient = new TonClient({
+      endpoint: 'https://toncenter.com/api/v2/jsonRPC',
+      apiKey: process.env.TONCENTER_API_KEY,
+    });
+  }
+  return _tonClient;
+}
 // ===== Price Cache (update every 5 mins) =====
 let priceCache = { price: 0.001286, updated: 0 }; // Fallback price
 
