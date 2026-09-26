@@ -277,3 +277,71 @@ footer a { color: #c3d4ea; font-size: 12px; text-shadow: 0 1px 6px rgba(0,0,0,.7
   padding: 2px 8px;
   border-radius: 8px;
 }
+
+/* Jetton Details Modal */
+.lock-detail-row {
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 10px;
+  padding: 14px;
+  margin-bottom: 12px;
+}
+
+.lock-detail-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.lock-id {
+  font-family: monospace;
+  font-size: 14px;
+  color: #fff;
+  font-weight: 600;
+}
+
+.lock-status {
+  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: 8px;
+  background: rgba(74,222,128,0.2);
+  color: #4ade80;
+}
+
+.lock-detail-info {
+  font-size: 13px;
+  color: #c3d4ea;
+  margin-bottom: 10px;
+}
+
+.lock-detail-info div {
+  margin: 4px 0;
+}
+
+.lock-detail-footer {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.btn-small {
+  display: inline-block;
+  padding: 6px 14px;
+  background: rgba(89,240,216,0.15);
+  border: 1px solid rgba(89,240,216,0.4);
+  border-radius: 8px;
+  color: #59f0d8;
+  font-size: 12px;
+  text-decoration: none;
+  transition: all 0.2s;
+}
+
+.btn-small:hover {
+  background: rgba(89,240,216,0.25);
+  box-shadow: 0 0 12px rgba(89,240,216,0.3);
+}
+
+.locks-detail-list {
+  max-height: 60vh;
+  overflow-y: auto;
+}
