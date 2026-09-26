@@ -4,66 +4,319 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>NEURON Vesting — Admin</title>
-  <p><a href="./index.html" style="color:#6cb4ff;font-size:13px">← back to showcase</a></p>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Marcellus&family=Manrope:wght@400;600;800&display=swap" rel="stylesheet" />
+  <link rel="icon" href="./media/icon-v3-192.png" />
   <style>
-    body { background: #0d0d0d; color: #eee; font-family: system-ui, sans-serif; margin: 0; padding: 16px; }
-    .card { background: #16161c; border: 1px solid #2a2a2a; border-radius: 10px; padding: 16px; margin-bottom: 14px; }
-    h1 { font-size: 22px; } h2 { font-size: 17px; margin: 0 0 10px; }
-    input, textarea, select { width: 100%; box-sizing: border-box; padding: 8px; background: #101014; color: #fff; border: 1px solid #333; border-radius: 6px; margin: 4px 0 10px; }
-    button { background: #2d6a4f; color: #fff; border: none; padding: 8px 14px; border-radius: 6px; cursor: pointer; margin-right: 6px; }
-    button.red { background: #8b2635; } button.gray { background: #444; }
+    :root {
+      --bg: #060a14;
+      --card: rgba(8, 12, 22, 0.85);
+      --border: rgba(235, 232, 224, 0.18);
+      --border-hover: rgba(235, 232, 224, 0.5);
+      --text: #ebe8e0;
+      --muted: #8a8a8a;
+      --gold: #c9a961;
+      --green: #4ade80;
+      --red: #ff6b6b;
+      --yellow: #ffd43b;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0; padding: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Manrope', system-ui, sans-serif;
+      min-height: 100vh;
+    }
+    body::before {
+      content: '';
+      position: fixed; inset: 0;
+      background-image: url('./media/bg-city-poster.webp');
+      background-size: cover;
+      background-position: center;
+      opacity: 0.15;
+      z-index: -1;
+    }
+
+    header {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 24px 20px 12px;
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    header .brand {
+      display: flex; align-items: baseline; gap: 10px;
+    }
+    header h1 {
+      font-family: 'Marcellus', serif;
+      font-weight: 400;
+      font-size: 22px;
+      margin: 0;
+      letter-spacing: 0.08em;
+      color: var(--gold);
+    }
+    header .sub {
+      font-size: 12px; color: var(--muted); letter-spacing: 0.05em;
+    }
+    header .back {
+      font-size: 13px; color: #6cb4ff; text-decoration: none;
+    }
+    header .back:hover { text-decoration: underline; }
+
+    main {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 8px 20px 48px;
+    }
+
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 20px;
+      margin-bottom: 16px;
+      backdrop-filter: blur(10px);
+      transition: border-color 0.2s;
+    }
+    .card:hover { border-color: var(--border-hover); }
+
+    h2 {
+      font-family: 'Marcellus', serif;
+      font-weight: 400;
+      font-size: 16px;
+      margin: 0 0 14px;
+      letter-spacing: 0.08em;
+      color: var(--text);
+      text-transform: uppercase;
+    }
+
+    input, textarea, select {
+      width: 100%;
+      padding: 10px 12px;
+      background: rgba(16, 16, 20, 0.9);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      margin: 4px 0 12px;
+      font-family: 'Manrope', sans-serif;
+      font-size: 14px;
+      transition: border-color 0.2s;
+    }
+    input:focus, textarea:focus, select:focus {
+      outline: none;
+      border-color: var(--border-hover);
+    }
+
+    button {
+      background: rgba(45, 106, 79, 0.9);
+      color: #fff;
+      border: 1px solid rgba(74, 222, 128, 0.3);
+      padding: 9px 16px;
+      border-radius: 8px;
+      cursor: pointer;
+      margin-right: 6px;
+      margin-bottom: 6px;
+      font-family: 'Manrope', sans-serif;
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 0.03em;
+      transition: all 0.2s;
+    }
+    button:hover {
+      background: rgba(45, 106, 79, 1);
+      border-color: rgba(74, 222, 128, 0.6);
+    }
+    button.red {
+      background: rgba(139, 38, 53, 0.9);
+      border-color: rgba(255, 107, 107, 0.3);
+    }
+    button.red:hover {
+      background: rgba(139, 38, 53, 1);
+      border-color: rgba(255, 107, 107, 0.6);
+    }
+    button.gray {
+      background: rgba(60, 60, 70, 0.9);
+      border-color: rgba(235, 232, 224, 0.15);
+    }
+    button.gray:hover {
+      background: rgba(80, 80, 90, 1);
+    }
+
     .hidden { display: none; }
-    .pill { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; }
-    .pill.pending { background: #6b5b1e; } .pill.approved { background: #2d6a4f; } .pill.rejected { background: #8b2635; }
-    pre { background: #101014; padding: 8px; border-radius: 6px; white-space: pre-wrap; word-break: break-all; font-size: 11px; }
-    table { width: 100%; border-collapse: collapse; font-size: 12px; }
-    td, th { border-bottom: 1px solid #2a2a2a; padding: 6px 4px; text-align: left; }
-    .ok { color: #7ee2a8; } .err { color: #ff8a8a; } .hint { color: #999; font-size: 12px; }
-    a { color: #6cb4ff; }
+
+    .pill {
+      display: inline-block;
+      padding: 3px 10px;
+      border-radius: 10px;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+    .pill.pending { background: rgba(107, 91, 30, 0.9); color: var(--yellow); }
+    .pill.approved { background: rgba(45, 106, 79, 0.9); color: var(--green); }
+    .pill.rejected { background: rgba(139, 38, 53, 0.9); color: var(--red); }
+
+    pre {
+      background: rgba(16, 16, 20, 0.95);
+      padding: 12px;
+      border-radius: 8px;
+      white-space: pre-wrap;
+      word-break: break-all;
+      font-size: 11px;
+      border: 1px solid var(--border);
+      color: #b8b8b8;
+      max-height: 260px;
+      overflow-y: auto;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+    td, th {
+      border-bottom: 1px solid var(--border);
+      padding: 8px 6px;
+      text-align: left;
+    }
+    th {
+      color: var(--muted);
+      font-weight: 600;
+      text-transform: uppercase;
+      font-size: 10px;
+      letter-spacing: 0.08em;
+    }
+
+    .ok { color: var(--green); }
+    .err { color: var(--red); }
+    .hint { color: var(--muted); font-size: 12px; }
+    a { color: #6cb4ff; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    /* Журнал заявок */
+    #queue .card {
+      background: rgba(16, 16, 24, 0.6);
+      margin-bottom: 12px;
+      padding: 14px 16px;
+    }
+
+    /* Login */
+    #login-box {
+      max-width: 420px;
+      margin: 40px auto;
+      text-align: center;
+    }
+    #login-box h2 { color: var(--gold); }
+    #login-box button { width: 100%; margin-top: 6px; }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .topbar .spacer { flex: 1; }
+
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px;
+      margin-bottom: 8px;
+    }
+    .stat-box {
+      background: rgba(16, 16, 24, 0.6);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px;
+      text-align: center;
+    }
+    .stat-label {
+      font-size: 10px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+    .stat-value {
+      font-family: 'Marcellus', serif;
+      font-size: 22px;
+      color: var(--text);
+    }
+
+    @media (max-width: 600px) {
+      header { flex-direction: column; align-items: flex-start; }
+      header h1 { font-size: 18px; }
+      .card { padding: 16px; }
+      .topbar button { flex: 1; }
+    }
   </style>
 </head>
 <body>
-  <h1>🛡️ NEURON Vesting — Admin</h1>
-
-  <div class="card" id="login-box">
-    <h2>Admin login</h2>
-    <input id="pass" type="password" placeholder="passphrase" />
-    <button id="btn-login">Login</button>
-    <p id="login-status" class="hint"></p>
-  </div>
-
-  <div id="main" class="hidden">
-    <div class="card">
-      <button class="gray" id="btn-logout">Logout</button>
-      <button class="gray" id="btn-reload">↻ Refresh all</button>
-      <span id="who" class="hint"></span>
+  <header>
+    <div class="brand">
+      <h1>🛡️ NEURON ADMIN</h1>
+      <span class="sub">VESTING · MAINNET</span>
     </div>
+    <a class="back" href="./index.html">← back to showcase</a>
+  </header>
 
-    <div class="card">
-      <h2>Whitelist applications</h2>
-      <div id="queue"><p class="hint">Loading...</p></div>
-    </div>
+  <main>
+    <!-- Login -->
+    <section class="card" id="login-box">
+      <h2>Admin Login</h2>
+      <input id="pass" type="password" placeholder="Enter passphrase" autocomplete="current-password" />
+      <button id="btn-login">Login</button>
+      <p id="login-status" class="hint"></p>
+    </section>
 
-    <div class="card">
-      <h2>Fees</h2>
-      <div id="fees"><p class="hint">Loading...</p></div>
-      <h2>Withdraw jetton fees</h2>
-      <input id="wf-master" placeholder="jetton master (EQ...)" />
-      <input id="wf-amount" type="number" placeholder="amount (jettons)" />
-      <input id="wf-dest" placeholder="destination wallet (EQ...)" />
-      <button id="btn-wf">Build withdraw link</button>
-      <h2>Withdraw TON fees</h2>
-      <input id="wt-amount" type="number" placeholder="amount (TON)" />
-      <input id="wt-dest" placeholder="destination wallet (EQ...)" />
-      <button id="btn-wt">Build withdraw link</button>
-      <div id="withdraw-out"></div>
-    </div>
+    <!-- Main panel -->
+    <div id="main" class="hidden">
+      <div class="card">
+        <div class="topbar">
+          <button class="gray" id="btn-reload">↻ Refresh all</button>
+          <button class="gray" id="btn-logout">Logout</button>
+          <span class="spacer"></span>
+          <span id="who" class="hint"></span>
+        </div>
+      </div>
 
-    <div class="card">
-      <h2>On-chain events</h2>
-      <div id="events"><p class="hint">Loading...</p></div>
+      <div class="card">
+        <h2>Whitelist Applications</h2>
+        <div id="queue"><p class="hint">Loading...</p></div>
+      </div>
+
+      <div class="card">
+        <h2>Fees</h2>
+        <div id="fees"><p class="hint">Loading...</p></div>
+      </div>
+
+      <div class="card">
+        <h2>Withdraw Jetton Fees</h2>
+        <input id="wf-master" placeholder="Jetton master address (EQ...)" />
+        <input id="wf-amount" type="number" placeholder="Amount (jettons)" />
+        <input id="wf-dest" placeholder="Destination wallet (EQ...)" />
+        <button id="btn-wf">Build withdraw body</button>
+        <div id="withdraw-out"></div>
+      </div>
+
+      <div class="card">
+        <h2>Withdraw TON Fees</h2>
+        <input id="wt-amount" type="number" placeholder="Amount (TON)" />
+        <input id="wt-dest" placeholder="Destination wallet (EQ...)" />
+        <button id="btn-wt">Build withdraw body</button>
+      </div>
+
+      <div class="card">
+        <h2>On-chain Events</h2>
+        <div id="events"><p class="hint">Loading...</p></div>
+      </div>
     </div>
-  </div>
+  </main>
 
   <script type="module" src="/src/admin.ts"></script>
 </body>
