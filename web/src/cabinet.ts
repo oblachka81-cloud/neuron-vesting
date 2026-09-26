@@ -58,9 +58,9 @@ function lockCard(l: Lock) {
     const claimBtn = isBen
       ? `<button class="btn-claim" data-claim data-lock-id="${l.lock_id}" data-wallet="${l.lockup_wallet}">Claim</button>`
       : `<span class="hint" style="margin-left:8px">(claim for beneficiary only)</span>`;
-    status = ` <span data-timer="${l.unlock_at}" class="timer">ready</span>${claimBtn}`;
+    status = `⏰ <span data-timer="${l.unlock_at}" class="timer">ready</span>${claimBtn}`;
   } else {
-    status = ` unlocks in <span data-timer="${l.unlock_at}" class="timer"></span>`;
+    status = `🔒 unlocks in <span data-timer="${l.unlock_at}" class="timer"></span>`;
   }
   const ms = l.jetton_master.slice(0, 6) + '...' + l.jetton_master.slice(-4);
   return `<div class="lock-card">
@@ -172,6 +172,7 @@ async function onAppSubmit(e: Event) {
   }
 }
 
+// ── ОРИГИНАЛЬНАЯ РАБОЧАЯ ФУНКЦИЯ (без изменений) ──
 async function jettonIcon(master: string): Promise<string | null> {
   try {
     const r = await fetch(`${API_URL}/api/jetton/${encodeURIComponent(master)}/icon`);
@@ -180,7 +181,6 @@ async function jettonIcon(master: string): Promise<string | null> {
   } catch { return null; }
 }
 
-// ── on-chain check: does factory know this master? ───────────────────────
 function stackNum(e: any): bigint {
   const s = String(Array.isArray(e) ? e[1] : e);
   if (s.startsWith('-0x')) return -BigInt('0x' + s.slice(3));
@@ -209,6 +209,7 @@ async function isWhitelistedOnchain(master: string): Promise<boolean> {
   } catch { return false; }
 }
 
+// ── ОРИГИНАЛЬНАЯ РАБОЧАЯ ФУНКЦИЯ WHITELIST (без изменений) ──
 async function refreshWhitelist() {
   const list = document.getElementById('whitelist-list')!;
   list.innerHTML = '<p class="hint">Loading...</p>';
@@ -245,8 +246,7 @@ async function refreshWhitelist() {
   }
 }
 
-// ── Vaults Tab Logic ───────────────────────────────────────────────────────
-
+// ── Vaults Tab Logic (добавлено аккуратно) ──
 function formatUSD(n: number): string {
   if (n >= 1e9) return `$${(n / 1e9).toFixed(2)}B`;
   if (n >= 1e6) return `$${(n / 1e6).toFixed(2)}M`;
@@ -310,8 +310,6 @@ async function refreshVaults() {
   }
 }
 
-// ── Jetton Details Modal ──────────────────────────────────────────────────
-
 async function showJettonDetails(master: string) {
   const modal = document.getElementById('jetton-modal')!;
   const content = document.getElementById('modal-content')!;
@@ -371,7 +369,7 @@ async function showJettonDetails(master: string) {
   modal.onclick = (e) => { if (e.target === modal) modal.style.display = 'none'; };
 }
 
-// Expose ALL functions (ЧИСТЫЙ ЭКСПОРТ - без дубликатов)
+// ОДИН чистый экспорт, без дубликатов
 (window as any).__nv = { 
   refreshLocks, 
   refreshApps, 
@@ -380,7 +378,6 @@ async function showJettonDetails(master: string) {
   showJettonDetails 
 };
 
-// dynamic pill: reflects on-chain state of COGNIQ in new factory
 (async () => {
   const el = document.getElementById('pill-wl');
   if (!el) return;
