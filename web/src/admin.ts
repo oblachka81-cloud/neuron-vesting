@@ -137,26 +137,27 @@ admin: ${d.revoked ? '✅ zero (revoked)' : '⚠️ ' + d.admin.toString()}</pre
     const box = $('dd-' + id);
     box.innerHTML = '<p class="hint">Approving...</p>';
     try {
-      const apps = (await api('/api/admin/applications')).applications;
-      const a = apps.find((x: any) => x.id === id);
-      const master = Address.parse(a.jetton_master);
-      await api('/api/admin/applications/approve', {
+      const r = await api('/api/admin/applications/approve', {
         method: 'POST',
-        body: JSON.stringify({ id, name: a.applicant_name, symbol: (a.applicant_name || '').split(' ')[0] }),
+        body: JSON.stringify({ id }),
       });
-      let linkBlock = '<p class="hint">On-chain deep-link появится после переключения на mainnet (сейчас testnet). Одобрение в БД выполнено.</p>';
-      try {
-        const jw = await factoryJettonWallet(master);
-        const link = deepLink(setJettonWalletBody(master, jw));
-        linkBlock = `<p class="hint">On-chain шаг: подпиши SetJettonWallet кошельком TREASURY (factory jetton wallet: ${jw.toString()}).</p>
-          <pre>${link}</pre>
-          <button class="gray" onclick="navigator.clipboard.writeText('${link}')">Copy link</button>`;
-      } catch (e: any) {
-        linkBlock = `<p class="hint">On-chain ссылка не собрана (${e.message}) — появится после mainnet-переключения; БД-одобрение готово.</p>`;
-      }
-      box.innerHTML = `<p class="ok">✅ DB approved + whitelist updated.</p>${linkBlock}`;
+      const m = r.multisig;
+      box.innerHTML = `
+        <p class="ok">✅ Approved in DB + whitelist updated.</p>
+        <p class="hint">On-chain шаг — подпиши в multisig.ton.org (2-of-3):</p>
+        <p><b>Target:</b> <code>${m.target}</code></p>
+        <p><b>Value:</b> ${m.value} TON</p>
+        <p><b>Factory JW:</b> <code>${m.factory_jetton_wallet}</code></p>
+        <p><b>query_id:</b> ${m.query_id}</p>
+        <p><b>Body:</b></p>
+        <pre>${m.body_base64}</pre>
+        <button class="gray" onclick="navigator.clipboard.writeText('${m.body_base64}')">Copy Body</button>
+        <a href="https://multisig.ton.org" target="_blank" rel="noopener"><button>Open multisig.ton.org</button></a>
+      `;
       loadQueue();
-    } catch (e: any) { box.innerHTML = `<p class="hint err">Approve failed: ${e.message}</p>`; }
+    } catch (e: any) {
+      box.innerHTML = `<p class="hint err">Approve failed: ${e.message}</p>`;
+    }
   },
   async reject(id: number) {
     const reason = prompt('Reject reason (will be shown to applicant):');
