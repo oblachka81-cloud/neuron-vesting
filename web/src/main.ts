@@ -1,4 +1,4 @@
-import './price'; 
+import './price';
 import './polyfills';
 import { TonConnectUI } from '@tonconnect/ui';
 import { MANIFEST_URL } from './config';
@@ -21,8 +21,10 @@ document.querySelectorAll('[data-tab]').forEach((btn) => {
     document.querySelectorAll('[data-panel]').forEach((p) => p.classList.remove('active'));
     btn.classList.add('active');
     document.querySelector(`[data-panel="${tab}"]`)!.classList.add('active');
+    
     if (tab === 'locks') (window as any).__nv.refreshLocks();
     if (tab === 'apps') (window as any).__nv.refreshApps();
     if (tab === 'whitelist') (window as any).__nv.refreshWhitelist();
+    if (tab === 'vaults') (window as any).__nv.refreshVaults(); // <-- ДОБАВИЛИ ЭТУ СТРОКУ
   });
 });
