@@ -210,3 +210,70 @@ footer a { color: #c3d4ea; font-size: 12px; text-shadow: 0 1px 6px rgba(0,0,0,.7
   backdrop-filter: blur(4px);
 }
 .music-btn:active { box-shadow: 0 0 18px rgba(202,166,78,.5); }
+
+/* ── Vaults Tab Styles (v5) ─────────────────────────────────────────────── */
+.vault-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+  padding: 8px 0;
+}
+
+.stat-box {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  padding: 16px;
+  text-align: center;
+}
+
+.stat-label {
+  font-size: 11px;
+  color: #888;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.stat-value {
+  font-size: 22px;
+  font-weight: 800;
+  color: #fff;
+  margin: 8px 0 4px;
+}
+
+.stat-sub {
+  font-size: 13px;
+  color: #4ade80;
+  font-weight: 600;
+}
+
+.jetton-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  font-size: 14px;
+}
+
+.jetton-row:last-child {
+  border-bottom: none;
+}
+
+.jetton-addr {
+  color: #aaa;
+  font-family: monospace;
+}
+
+.jetton-tvl {
+  color: #fff;
+  font-weight: 600;
+}
+
+.jetton-count {
+  color: #888;
+  font-size: 12px;
+  background: rgba(255, 255, 255, 0.05);
+  padding: 2px 8px;
+  border-radius: 8px;
+}
