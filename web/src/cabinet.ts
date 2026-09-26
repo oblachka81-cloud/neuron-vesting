@@ -292,13 +292,19 @@ async function refreshVaults() {
     if (j.summary.by_jetton.length === 0) {
       jettonsEl.innerHTML = '<p class="hint">No active locks yet</p>';
     } else {
-      jettonsEl.innerHTML = j.summary.by_jetton.map((x: any) => `
-        <div class="jetton-row">
-          <span class="jetton-addr">${x.jetton_master.slice(0, 6)}...${x.jetton_master.slice(-4)}</span>
-          <span class="jetton-tvl">${formatCoins(x.tvl_nano)}</span>
-          <span class="jetton-count">${x.locks} locks</span>
-        </div>
-      `).join('');
+      // Fetch icons in parallel and render clickable rows
+      const rows = await Promise.all(j.summary.by_jetton.map(async (x: any) => {
+        const iconSrc = await jettonIcon(x.jetton_master);
+        return `
+          <div class="jetton-row" style="cursor:pointer;" onclick="window.__nv.showJettonDetails('${x.jetton_master}')">
+            ${iconSrc ? `<img src="${iconSrc}" width="24" height="24" style="border-radius:50%; margin-right:8px;" />` : ''}
+            <span class="jetton-addr">${x.jetton_master.slice(0, 6)}...${x.jetton_master.slice(-4)}</span>
+            <span class="jetton-tvl">${formatCoins(x.tvl_nano)}</span>
+            <span class="jetton-count">${x.locks} locks</span>
+          </div>
+        `;
+      }));
+      jettonsEl.innerHTML = rows.join('');
     }
   } catch (e: any) {
     summaryEl.innerHTML = `<p class="hint" style="color:#ff6b6b">Error: ${e.message}</p>`;
@@ -315,11 +321,8 @@ async function showJettonDetails(master: string) {
   content.innerHTML = '<p class="hint">Loading locks...</p>';
   
   try {
-    // Fetch locks
     const r = await fetch(`${API_URL}/api/locks/by-jetton?master=${encodeURIComponent(master)}`);
     const j = await r.json();
-    
-    // Fetch icon
     const iconSrc = await jettonIcon(master);
     
     const locksHtml = j.locks.map((l: any) => {
@@ -365,72 +368,18 @@ async function showJettonDetails(master: string) {
     content.innerHTML = `<p class="hint" style="color:#ff6b6b">Error: ${e.message}</p>`;
   }
   
-  // Close handler
-  document.getElementById('modal-close')!.onclick = () => {
-    modal.style.display = 'none';
-  };
-  modal.onclick = (e) => {
-    if (e.target === modal) modal.style.display = 'none';
-  };
+  document.getElementById('modal-close')!.onclick = () => { modal.style.display = 'none'; };
+  modal.onclick = (e) => { if (e.target === modal) modal.style.display = 'none'; };
 }
 
-// Update jetton row to be clickable
-async function refreshVaults() {
-  const summaryEl = document.getElementById('vaults-summary')!;
-  const jettonsEl = document.getElementById('vaults-jettons')!;
-  
-  try {
-    const r = await fetch(`${API_URL}/api/locks/public`);
-    const j = await r.json();
-    
-    const totalTVL_nano = BigInt(j.summary.total.total_tvl_nano);
-    const totalTVL_coins = Number(totalTVL_nano / 10n ** 9n);
-    const totalTVL_usd = totalTVL_coins * j.price_usd;
-    const totalLocks = j.summary.total.total_locks;
-
-    summaryEl.innerHTML = `
-      <div class="vault-stats">
-        <div class="stat-box">
-          <div class="stat-label">Total Value Locked</div>
-          <div class="stat-value">${formatUSD(totalTVL_usd)}</div>
-          <div class="stat-sub">${formatCoins(totalTVL_nano)} COGNIQ</div>
-        </div>
-        <div class="stat-box">
-          <div class="stat-label">Active Locks</div>
-          <div class="stat-value">${totalLocks}</div>
-        </div>
-        <div class="stat-box">
-          <div class="stat-label">COGNIQ Price</div>
-          <div class="stat-value">$${j.price_usd.toFixed(6)}</div>
-        </div>
-      </div>
-    `;
-
-    if (j.summary.by_jetton.length === 0) {
-      jettonsEl.innerHTML = '<p class="hint">No active locks yet</p>';
-    } else {
-      jettonsEl.innerHTML = await Promise.all(j.summary.by_jetton.map(async (x: any) => {
-        const iconSrc = await jettonIcon(x.jetton_master);
-        return `
-          <div class="jetton-row" style="cursor:pointer;" onclick="(window as any).__nv.showJettonDetails('${x.jetton_master}')">
-            ${iconSrc ? `<img src="${iconSrc}" width="24" height="24" style="border-radius:50%; margin-right:8px;" />` : ''}
-            <span class="jetton-addr">${x.jetton_master.slice(0, 6)}...${x.jetton_master.slice(-4)}</span>
-            <span class="jetton-tvl">${formatCoins(x.tvl_nano)}</span>
-            <span class="jetton-count">${x.locks} locks</span>
-          </div>
-        `;
-      })).then(rows => rows.join(''));
-    }
-  } catch (e: any) {
-    summaryEl.innerHTML = `<p class="hint" style="color:#ff6b6b">Error: ${e.message}</p>`;
-  }
-}
-
-// Expose showJettonDetails
-(window as any).__nv = { refreshLocks, refreshApps, refreshWhitelist, refreshVaults, showJettonDetails };
-
-// expose to tab switcher
-(window as any).__nv = { refreshLocks, refreshApps, refreshWhitelist, refreshVaults };
+// Expose ALL functions to tab switcher and global window (ЧИСТЫЙ ЭКСПОРТ)
+(window as any).__nv = { 
+  refreshLocks, 
+  refreshApps, 
+  refreshWhitelist, 
+  refreshVaults, 
+  showJettonDetails 
+};
 
 // dynamic pill: reflects on-chain state of COGNIQ in new factory
 (async () => {
