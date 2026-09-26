@@ -222,7 +222,7 @@ async function onAppSubmit(e: Event) {
   }
 }
 
-// ── Icons + whitelist (working path) ─────────────────────────────────────
+// ── Icons + whitelist ────────────────────────────────────────────────────
 
 async function jettonIcon(master: string): Promise<string | null> {
   try {
@@ -235,6 +235,17 @@ async function jettonIcon(master: string): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+/** img с no-referrer — postimg/cdn часто режут hotlink по Referer */
+function iconTag(src: string | null, size: number): string {
+  if (!src) {
+    return `<span style="display:inline-block;width:${size}px;height:${size}px;border-radius:50%;background:#333;margin-right:6px;vertical-align:middle"></span>`;
+  }
+  return `<img src="${src}" width="${size}" height="${size}" alt=""
+    referrerpolicy="no-referrer"
+    style="border-radius:50%;vertical-align:middle;background:#222;margin-right:6px;object-fit:cover"
+    onerror="this.style.opacity='0.35'" />`;
 }
 
 function stackNum(e: any): bigint {
@@ -284,10 +295,10 @@ async function refreshWhitelist() {
     const rows: string[] = [];
     for (const x of wl) {
       const onchain = await isWhitelistedOnchain(x.jetton_master);
+      const src = await jettonIcon(x.jetton_master);
       rows.push(`<div class="lock-card">
         <div class="lock-head">
-          <img data-icon="${x.jetton_master}" width="26" height="26" alt=""
-               style="border-radius:50%;vertical-align:middle;background:#222;margin-right:6px;object-fit:cover" />
+          ${iconTag(src, 26)}
           <b>${x.symbol || '?'}</b> · ${x.name || '—'}
           <span style="margin-left:8px;font-size:11px;padding:2px 8px;border-radius:10px;background:${onchain ? '#1d4d2b' : '#6b2b2b'};color:#fff">
             ${onchain ? 'ON-CHAIN ✓' : 'NOT ON-CHAIN'}
@@ -298,27 +309,12 @@ async function refreshWhitelist() {
       </div>`);
     }
     list.innerHTML = rows.join('');
-    const imgs = Array.from(
-      list.querySelectorAll('img[data-icon]'),
-    ) as HTMLImageElement[];
-    for (const img of imgs) {
-      const src = await jettonIcon(img.dataset.icon!);
-      if (src) {
-        img.src = src;
-        img.onerror = () => {
-          img.style.display = 'none';
-        };
-      } else {
-        img.style.display = 'none';
-      }
-      await new Promise((r2) => setTimeout(r2, 200));
-    }
   } catch (e: any) {
     list.innerHTML = `<p class="hint" style="color:#ff6b6b">Error: ${e.message}</p>`;
   }
 }
 
-// ── Vaults (single implementation) ───────────────────────────────────────
+// ── Vaults ───────────────────────────────────────────────────────────────
 
 function formatUSD(n: number): string {
   if (n >= 1e9) return `$${(n / 1e9).toFixed(2)}B`;
@@ -376,13 +372,7 @@ async function refreshVaults() {
       const iconSrc = await jettonIcon(master);
       rows.push(`
         <div class="jetton-row" style="cursor:pointer" data-master="${master.replace(/"/g, '')}">
-          ${
-            iconSrc
-              ? `<img src="${iconSrc}" width="24" height="24"
-                   style="border-radius:50%;margin-right:8px;object-fit:cover;background:#222"
-                   onerror="this.style.display='none'" />`
-              : ''
-          }
+          ${iconTag(iconSrc, 24)}
           <span class="jetton-addr">${master.slice(0, 6)}...${master.slice(-4)}</span>
           <span class="jetton-tvl">${formatCoins(x.tvl_nano)}</span>
           <span class="jetton-count">${x.locks} locks</span>
@@ -446,12 +436,7 @@ async function showJettonDetails(master: string) {
 
     content.innerHTML = `
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;">
-        ${
-          iconSrc
-            ? `<img src="${iconSrc}" width="40" height="40" style="border-radius:50%;background:#222;object-fit:cover"
-                 onerror="this.style.display='none'" />`
-            : ''
-        }
+        ${iconTag(iconSrc, 40)}
         <div>
           <div style="font-family:monospace;font-size:12px;color:#888">${master}</div>
           <div style="font-size:14px;color:#4ade80">${locks.length} locks</div>
@@ -473,7 +458,7 @@ async function showJettonDetails(master: string) {
   };
 }
 
-// ── Single export for tab switcher ───────────────────────────────────────
+// ── Single export ────────────────────────────────────────────────────────
 
 (window as any).__nv = {
   refreshLocks,
