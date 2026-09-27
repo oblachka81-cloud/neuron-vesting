@@ -578,80 +578,38 @@ describe('NEURON Vesting — v4 (isolated + TEP-89)', () => {
             expect(res.transactions).toHaveTransaction({ from: beneficiary.address, to: wallet.address, success: false });
         });
 
-        // Test 44: Foreign JettonExcesses (not from own wallet or beneficiary wallet)
-  it("should reject foreign JettonExcesses", async () => {
-    const { wallet, beneficiary, creator, factory } = await deployWalletAndFund();
-    
-    // Claim first to set pending_claim = true
-    const claimTx = await wallet.send(beneficiary, { value: toNano("0.1") }, {
-      $$type: "Claim",
-      queryId: 1n,
-      amount: 0n, // full claim
+        it('44. foreign JettonExcesses -> rejected with not-our-wallet', async () => {
+    const unlockAt = BigInt(blockchain.now! + 100);
+    const wallet = blockchain.openContract(
+        await LockupWallet.fromInit(
+            500n, factory.address, jettonMaster.address,
+            beneficiary.address, user.address, LOCK_AMOUNT, unlockAt,
+        ),
+    );
+    await wallet.send(treasury.getSender(), { value: toNano('2') }, null);
+    await wallet.send(jettonMaster.getSender(), { value: toNano('0.1') },
+        makeTakeWalletAddress(0n, fakeJettonWallet.address, wallet.address));
+    await wallet.send(fakeJettonWallet.getSender(), { value: toNano('0.1') }, {
+        $$type: 'JettonNotification',
+        query_id: 1n, amount: LOCK_AMOUNT, sender: user.address,
+        forward_payload: beginCell().endCell().asSlice(),
     });
-    expect(claimTx.transactions).toHaveTransaction({
-      from: wallet.address,
-      to: beneficiary.address,
-      success: true,
+    blockchain.now = Number(unlockAt) + 10;
+
+    // Инициируем claim, чтобы pending_claim = true
+    await wallet.send(beneficiary.getSender(), { value: toNano('0.5') }, {
+        $$type: 'Claim', query_id: 1n, amount: 0n,
     });
 
-    // Now send a foreign excess (not from jetton_wallet, not from beneficiary_wallet)
-    const foreignSender = Address.parse("0:" + "a".repeat(64));
-    const foreignTx = await wallet.send(foreignSender, { value: toNano("0.05") }, {
-      $$type: "JettonExcesses",
-      queryId: 1n,
+    // Чужой sender — не jw, не bw
+    const foreign = await blockchain.treasury('foreign');
+    const res = await wallet.send(foreign.getSender(), { value: toNano('0.05') }, {
+        $$type: 'JettonExcesses', query_id: 1n,
     });
-    
-    // Should revert with "not our wallet"
-    expect(foreignTx.transactions).toHaveTransaction({
-      from: foreignSender,
-      to: wallet.address,
-      success: false,
-      exitCode: 36235,
+    expect(res.transactions).toHaveTransaction({
+        from: foreign.address, to: wallet.address, success: false,
     });
-  });
-
-  // Test 44.1: JettonExcesses from beneficiary_wallet settles claim
-  it("should accept JettonExcesses from beneficiary wallet (TEP-74 response_destination)", async () => {
-    const { wallet, beneficiary, jettonMaster, factory } = await deployWalletAndFund();
-    
-    // Claim first
-    const claimTx = await wallet.send(beneficiary, { value: toNano("0.1") }, {
-      $$type: "Claim",
-      queryId: 1n,
-      amount: 0n,
-    });
-    expect(claimTx.transactions).toHaveTransaction({
-      from: wallet.address,
-      success: true,
-    });
-
-    // Get the beneficiary's jetton wallet address (from TakeWalletAddress response)
-    const beneficiaryJW = await jettonMaster.getWalletAddress(beneficiary.address);
-    
-    // Send excess FROM beneficiary's jetton wallet (simulating TEP-74 behavior)
-    const excessTx = await wallet.send(beneficiaryJW, { value: toNano("0.05") }, {
-      $$type: "JettonExcesses",
-      queryId: 1n,
-    });
-    
-    // Should succeed and trigger sweep + self-destruct
-    expect(excessTx.transactions).toHaveTransaction({
-      from: beneficiaryJW,
-      to: wallet.address,
-      success: true,
-    });
-    
-    // Should send sweep to beneficiary
-    expect(excessTx.transactions).toHaveTransaction({
-      from: wallet.address,
-      to: beneficiary.address,
-      success: true,
-    });
-    
-    // Wallet should be destroyed (balance = 0)
-    const walletBalance = await wallet.getBalance();
-    expect(walletBalance).toEqual(0n);
-  });
+});
 
         it('45. availableClaimable = 0 before unlock', async () => {
             await wallet.send(jettonMaster.getSender(), { value: toNano('0.1') },
@@ -847,4 +805,172 @@ describe('NEURON Vesting — v4 (isolated + TEP-89)', () => {
             expect(await wallet.getIsFunded()).toEqual(true);
         });
     });
+
+    // ═══════════════════════════════════════════════════════════════════
+// v5.0.1 — JettonExcesses from either side of the TEP-74 transfer chain
+
+it('52. Excesses from beneficiary_wallet settles claim + sweeps + self-destructs', async () => {
+    const unlockAt = BigInt(blockchain.now! + 100);
+    const wallet = blockchain.openContract(
+        await LockupWallet.fromInit(
+            501n, factory.address, jettonMaster.address,
+            beneficiary.address, user.address, LOCK_AMOUNT, unlockAt,
+        ),
+    );
+    await wallet.send(treasury.getSender(), { value: toNano('2') }, null);
+
+    // Discovery of our own JW
+    await wallet.send(jettonMaster.getSender(), { value: toNano('0.1') },
+        makeTakeWalletAddress(0n, fakeJettonWallet.address, wallet.address));
+    // Fund
+    await wallet.send(fakeJettonWallet.getSender(), { value: toNano('0.1') }, {
+        $$type: 'JettonNotification',
+        query_id: 1n, amount: LOCK_AMOUNT, sender: user.address,
+        forward_payload: beginCell().endCell().asSlice(),
+    });
+    blockchain.now = Number(unlockAt) + 10;
+
+    // Claim -> pending
+    const claimQid = 502n;
+    await wallet.send(beneficiary.getSender(), { value: toNano('0.5') }, {
+        $$type: 'Claim', query_id: claimQid, amount: 0n,
+    });
+
+    // TakeWalletAddress for beneficiary -> caches beneficiary_wallet
+    const benJW = await blockchain.treasury('benJW52');
+    await wallet.send(jettonMaster.getSender(), { value: toNano('0.1') },
+        makeTakeWalletAddress(claimQid, benJW.address, beneficiary.address));
+    expect(await wallet.getBeneficiaryWallet()).toEqualAddress(benJW.address);
+
+    // Excess FROM beneficiary_wallet
+    const res = await wallet.send(benJW.getSender(), { value: toNano('0.05') }, {
+        $$type: 'JettonExcesses', query_id: claimQid,
+    });
+    expect(res.transactions).toHaveTransaction({
+        from: benJW.address, to: wallet.address, success: true,
+    });
+    // Sweep to beneficiary
+    expect(res.transactions).toHaveTransaction({
+        from: wallet.address, to: beneficiary.address, success: true,
+    });
+    // Self-destructed
+    const state = await blockchain.getContract(wallet.address);
+    expect(state.balance).toBe(0n);
 });
+
+it('53. Excesses from jetton_wallet after claim also settles (sending-side path)', async () => {
+    const unlockAt = BigInt(blockchain.now! + 100);
+    const wallet = blockchain.openContract(
+        await LockupWallet.fromInit(
+            502n, factory.address, jettonMaster.address,
+            beneficiary.address, user.address, LOCK_AMOUNT, unlockAt,
+        ),
+    );
+    await wallet.send(treasury.getSender(), { value: toNano('2') }, null);
+    await wallet.send(jettonMaster.getSender(), { value: toNano('0.1') },
+        makeTakeWalletAddress(0n, fakeJettonWallet.address, wallet.address));
+    await wallet.send(fakeJettonWallet.getSender(), { value: toNano('0.1') }, {
+        $$type: 'JettonNotification',
+        query_id: 1n, amount: LOCK_AMOUNT, sender: user.address,
+        forward_payload: beginCell().endCell().asSlice(),
+    });
+    blockchain.now = Number(unlockAt) + 10;
+
+    const claimQid = 503n;
+    await wallet.send(beneficiary.getSender(), { value: toNano('0.5') }, {
+        $$type: 'Claim', query_id: claimQid, amount: 0n,
+    });
+
+    // TakeWalletAddress for beneficiary
+    const benJW = await blockchain.treasury('benJW53');
+    await wallet.send(jettonMaster.getSender(), { value: toNano('0.1') },
+        makeTakeWalletAddress(claimQid, benJW.address, beneficiary.address));
+
+    // Excess FROM our own jw (sending-side, matches fakeJettonWallet.address)
+    const res = await wallet.send(fakeJettonWallet.getSender(), { value: toNano('0.05') }, {
+        $$type: 'JettonExcesses', query_id: claimQid,
+    });
+    expect(res.transactions).toHaveTransaction({
+        from: fakeJettonWallet.address, to: wallet.address, success: true,
+    });
+    // Sweep
+    expect(res.transactions).toHaveTransaction({
+        from: wallet.address, to: beneficiary.address, success: true,
+    });
+    const state = await blockchain.getContract(wallet.address);
+    expect(state.balance).toBe(0n);
+});
+
+it('54. foreign Excesses (neither jw nor bw) -> rejected', async () => {
+    const unlockAt = BigInt(blockchain.now! + 100);
+    const wallet = blockchain.openContract(
+        await LockupWallet.fromInit(
+            503n, factory.address, jettonMaster.address,
+            beneficiary.address, user.address, LOCK_AMOUNT, unlockAt,
+        ),
+    );
+    await wallet.send(treasury.getSender(), { value: toNano('2') }, null);
+    await wallet.send(jettonMaster.getSender(), { value: toNano('0.1') },
+        makeTakeWalletAddress(0n, fakeJettonWallet.address, wallet.address));
+    await wallet.send(fakeJettonWallet.getSender(), { value: toNano('0.1') }, {
+        $$type: 'JettonNotification',
+        query_id: 1n, amount: LOCK_AMOUNT, sender: user.address,
+        forward_payload: beginCell().endCell().asSlice(),
+    });
+    blockchain.now = Number(unlockAt) + 10;
+
+    // Claim -> pending + set beneficiary_wallet
+    const claimQid = 504n;
+    await wallet.send(beneficiary.getSender(), { value: toNano('0.5') }, {
+        $$type: 'Claim', query_id: claimQid, amount: 0n,
+    });
+    const benJW = await blockchain.treasury('benJW54');
+    await wallet.send(jettonMaster.getSender(), { value: toNano('0.1') },
+        makeTakeWalletAddress(claimQid, benJW.address, beneficiary.address));
+
+    // Foreign sender — neither jw nor bw
+    const foreign = await blockchain.treasury('foreign54');
+    const res = await wallet.send(foreign.getSender(), { value: toNano('0.05') }, {
+        $$type: 'JettonExcesses', query_id: claimQid,
+    });
+    expect(res.transactions).toHaveTransaction({
+        from: foreign.address, to: wallet.address, success: false,
+    });
+    // Wallet still active, no sweep
+    const state = await blockchain.getContract(wallet.address);
+    expect(state.balance).toBeGreaterThan(0n);
+});
+
+it('55. Excesses before any claim -> success, no sweep (pending_claim = false)', async () => {
+    const unlockAt = BigInt(blockchain.now! + 3600);
+    const wallet = blockchain.openContract(
+        await LockupWallet.fromInit(
+            504n, factory.address, jettonMaster.address,
+            beneficiary.address, user.address, LOCK_AMOUNT, unlockAt,
+        ),
+    );
+    await wallet.send(treasury.getSender(), { value: toNano('2') }, null);
+    await wallet.send(jettonMaster.getSender(), { value: toNano('0.1') },
+        makeTakeWalletAddress(0n, fakeJettonWallet.address, wallet.address));
+    await wallet.send(fakeJettonWallet.getSender(), { value: toNano('0.1') }, {
+        $$type: 'JettonNotification',
+        query_id: 1n, amount: LOCK_AMOUNT, sender: user.address,
+        forward_payload: beginCell().endCell().asSlice(),
+    });
+
+    // NO claim. Just a stray excess from our own jw.
+    const res = await wallet.send(fakeJettonWallet.getSender(), { value: toNano('0.05') }, {
+        $$type: 'JettonExcesses', query_id: 1n,
+    });
+    expect(res.transactions).toHaveTransaction({
+        from: fakeJettonWallet.address, to: wallet.address, success: true,
+    });
+    // No sweep since pending_claim = false
+    expect(res.transactions).not.toHaveTransaction({
+        from: wallet.address, to: beneficiary.address, success: true,
+    });
+    // Wallet still active
+    const state = await blockchain.getContract(wallet.address);
+    expect(state.balance).toBeGreaterThan(0n);
+  });
+}); 
