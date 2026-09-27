@@ -254,9 +254,9 @@ async function addRoutes(req, res) {
 
       // 2. Prepare on-chain SetJettonWallet body for multisig
       const FACTORY = Address.parse(
-        process.env.FACTORY_ADDRESS
-          || 'EQBAbjNhuYAfWcZ6cnYXHCNhwOf1VH_OBNfkiAzEPvf7S6iE'
-      );
+      process.env.FACTORY_ADDRESS
+      || 'EQC1Y_OfkDqKiBh0nBzuKvbvSqIipcbswf_x7nuglJ9LZdBp'
+     );
       const master = Address.parse(app.jetton_master);
       const client = getTonClient();
 
