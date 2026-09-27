@@ -6,6 +6,26 @@ const LS_TOKEN = 'nv_admin_token';
 let token = localStorage.getItem(LS_TOKEN) || '';
 const $ = (id: string) => document.getElementById(id)!;
 
+// ── Escape helpers (XSS protection for untrusted applicant input) ──────
+const esc = (s: any): string =>
+  String(s ?? '').replace(/[&<>"']/g, (c) =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string));
+
+const safeUrl = (u: any): string => {
+  const s = String(u ?? '').trim();
+  return /^https?:\/\//i.test(s) ? s : '#';
+};
+
+// Deterministic zero-address for admin-revoked check (base64 string tricks lie).
+const ZERO_ADDR = new Address(0, Buffer.alloc(32));
+
+// Unique query_id per generated body. Date.now() alone collides on two calls
+// in the same millisecond -> second multisig order rejected as "qid reused".
+// Cross-process (front vs back) collision in the same wall-clock ms is ~0 and
+// benign (one order refused, no funds lost); intra-process is the real risk.
+let qSeq = 0;
+const freshQ = (): bigint => BigInt(Date.now()) * 1000n + BigInt(qSeq++);
+
 async function api(path: string, opts: any = {}) {
   const headers: any = { 'Content-Type': 'application/json' };
   if (token) headers['Authorization'] = 'Bearer ' + token;
@@ -38,7 +58,9 @@ async function jettonData(master: Address) {
   const supply = BigInt(stack[0][1]);
   const mintable = BigInt(stack[1][1]) !== 0n;
   const admin = cellFrom(stack[2][1].bytes).beginParse().loadAddress();
-  const revoked = admin.toString().replace(/[^0]/g, '').length === 0;
+  // Compare workchain + 32 bytes, not base64 alphabet (a live admin whose
+  // base64 happens to contain no '0' would falsely read as "revoked").
+  const revoked = admin.equals(ZERO_ADDR);
   return { supply, mintable, admin, revoked };
 }
 
@@ -47,22 +69,20 @@ function deepLink(body: Cell, amountTon = '0.1') {
     '&bin=' + encodeURIComponent(body.toBoc().toString('base64'));
 }
 
-const q = BigInt(Date.now());
-
 function setJettonWalletBody(master: Address, jw: Address) {
-  return beginCell().storeUint(0x21, 32).storeUint(q, 64).storeAddress(master).storeAddress(jw).endCell();
+  return beginCell().storeUint(0x21, 32).storeUint(freshQ(), 64).storeAddress(master).storeAddress(jw).endCell();
 }
 function withdrawFeesBody(master: Address, dest: Address, amountNano: bigint) {
-  return beginCell().storeUint(0x20, 32).storeUint(q, 64).storeAddress(master).storeAddress(dest).storeCoins(amountNano).endCell();
+  return beginCell().storeUint(0x20, 32).storeUint(freshQ(), 64).storeAddress(master).storeAddress(dest).storeCoins(amountNano).endCell();
 }
 function withdrawTonBody(dest: Address, amountNano: bigint) {
-  return beginCell().storeUint(0x22, 32).storeUint(q, 64).storeCoins(amountNano).storeAddress(dest).endCell();
+  return beginCell().storeUint(0x22, 32).storeUint(freshQ(), 64).storeCoins(amountNano).storeAddress(dest).endCell();
 }
 
 function showLink(box: HTMLElement, link: string, note: string) {
-  box.innerHTML = `<p class="hint">${note}</p><pre>${link}</pre>
+  box.innerHTML = `<p class="hint">${esc(note)}</p><pre>${esc(link)}</pre>
     <button class="gray" onclick="navigator.clipboard.writeText(decodeURIComponent('${encodeURIComponent(link)}'))">Copy link</button>
-    <a href="${link}"><button>Open in Tonkeeper</button></a>`;
+    <a href="${esc(link)}"><button>Open in Tonkeeper</button></a>`;
 }
 
 // ===== login =====
@@ -104,19 +124,20 @@ async function loadQueue() {
     if (!apps.length) { box.innerHTML = '<p class="hint">No applications</p>'; return; }
     box.innerHTML = apps.map((a: any) => `
       <div class="card">
-        <b>#${a.id}</b> <span class="pill ${a.status}">${a.status}</span><br/>
-        master: <code>${a.jetton_master}</code><br/>
-        name: ${a.applicant_name || '—'} · url: ${a.project_url ? `<a href="${a.project_url}" target="_blank">↗</a>` : '—'}<br/>
-        notes: ${a.notes || '—'}<br/>
-        <span class="hint">applicant: ${a.applicant}</span><br/>
-        <div id="dd-${a.id}"></div>
+        <b>#${esc(a.id)}</b> <span class="pill ${esc(a.status)}">${esc(a.status)}</span><br/>
+        master: <code>${esc(a.jetton_master)}</code><br/>
+        name: ${esc(a.applicant_name) || '—'} · url: ${a.project_url
+          ? `<a href="${esc(safeUrl(a.project_url))}" target="_blank" rel="noopener noreferrer">↗</a>` : '—'}<br/>
+        notes: ${esc(a.notes) || '—'}<br/>
+        <span class="hint">applicant: ${esc(a.applicant)}</span><br/>
+        <div id="dd-${esc(a.id)}"></div>
         ${a.status === 'pending' ? `
-          <button onclick="window.__nv.dd(${a.id})">Due diligence</button>
-          <button onclick="window.__nv.approve(${a.id})">Approve</button>
-          <button class="red" onclick="window.__nv.reject(${a.id})">Reject</button>` : ''}
-        ${a.decision_reason ? `<p class="hint">reason: ${a.decision_reason}</p>` : ''}
+          <button onclick="window.__nv.dd(${esc(a.id)})">Due diligence</button>
+          <button onclick="window.__nv.approve(${esc(a.id)})">Approve</button>
+          <button class="red" onclick="window.__nv.reject(${esc(a.id)})">Reject</button>` : ''}
+        ${a.decision_reason ? `<p class="hint">reason: ${esc(a.decision_reason)}</p>` : ''}
       </div>`).join('');
-  } catch (e: any) { box.innerHTML = `<p class="hint err">${e.message}</p>`; }
+  } catch (e: any) { box.innerHTML = `<p class="hint err">${esc(e.message)}</p>`; }
 }
 
 (window as any).__nv = {
@@ -130,8 +151,8 @@ async function loadQueue() {
       const d = await jettonData(master);
       box.innerHTML = `<pre>supply: ${(d.supply / 10n ** 9n).toString()}
 mintable: ${d.mintable ? '⚠️ YES (rug risk)' : '✅ no (revoked)'}
-admin: ${d.revoked ? '✅ zero (revoked)' : '⚠️ ' + d.admin.toString()}</pre>`;
-    } catch (e: any) { box.innerHTML = `<p class="hint err">DD failed: ${e.message}</p>`; }
+admin: ${d.revoked ? '✅ zero (revoked)' : '⚠️ ' + esc(d.admin.toString())}</pre>`;
+    } catch (e: any) { box.innerHTML = `<p class="hint err">DD failed: ${esc(e.message)}</p>`; }
   },
   async approve(id: number) {
     const box = $('dd-' + id);
@@ -142,20 +163,32 @@ admin: ${d.revoked ? '✅ zero (revoked)' : '⚠️ ' + d.admin.toString()}</pre
         body: JSON.stringify({ id }),
       });
       const m = r.multisig;
+      // Independent cross-check: the master baked into the signed body must
+      // equal the master on the application row (guards backend bug/compromise).
+      let matchLine = '<p class="hint">master in body: <code>' + esc(m.jetton_master) + '</code></p>';
+      try {
+        const apps = (await api('/api/admin/applications')).applications;
+        const a = apps.find((x: any) => x.id === id);
+        const ok = String(m.jetton_master || '').toLowerCase() === String(a?.jetton_master || '').toLowerCase();
+        matchLine = `<p><b>Master in body:</b> <code>${esc(m.jetton_master)}</code> ${
+          ok ? '<span class="ok">✅ совпадает с заявкой</span>'
+             : '<span class="err">❌ НЕ СОВПАДАЕТ — НЕ ПОДПИСЫВАЙ</span>'}</p>`;
+      } catch { /* keep plain line if re-fetch fails */ }
       box.innerHTML = `
         <p class="ok">✅ Approved in DB + whitelist updated.</p>
         <p class="hint">On-chain шаг — подпиши в multisig.ton.org (2-of-3):</p>
-        <p><b>Target:</b> <code>${m.target}</code></p>
-        <p><b>Value:</b> ${m.value} TON</p>
-        <p><b>Factory JW:</b> <code>${m.factory_jetton_wallet}</code></p>
-        <p><b>query_id:</b> ${m.query_id}</p>
+        ${matchLine}
+        <p><b>Target:</b> <code>${esc(m.target)}</code></p>
+        <p><b>Value:</b> ${esc(m.value)} TON</p>
+        <p><b>Factory JW:</b> <code>${esc(m.factory_jetton_wallet)}</code></p>
+        <p><b>query_id:</b> ${esc(m.query_id)}</p>
         <p><b>Body:</b></p>
-        <pre>${m.body_base64}</pre>
-        <button class="gray" onclick="navigator.clipboard.writeText('${m.body_base64}')">Copy Body</button>
-        <a href="https://multisig.ton.org" target="_blank" rel="noopener"><button>Open multisig.ton.org</button></a>
+        <pre>${esc(m.body_base64)}</pre>
+        <button class="gray" onclick="navigator.clipboard.writeText('${esc(m.body_base64)}')">Copy Body</button>
+        <a href="https://multisig.ton.org" target="_blank" rel="noopener noreferrer"><button>Open multisig.ton.org</button></a>
       `;
     } catch (e: any) {
-      box.innerHTML = `<p class="hint err">Approve failed: ${e.message}</p>`;
+      box.innerHTML = `<p class="hint err">Approve failed: ${esc(e.message)}</p>`;
     }
   },
   async reject(id: number) {
@@ -173,10 +206,10 @@ async function loadFees() {
   const box = $('fees');
   try {
     const s = await api('/api/admin/stats');
-    box.innerHTML = `<p>Jetton fees: <b>${(BigInt(s.jetton_fees_nano) / 10n ** 9n).toString()}</b> (nano: ${s.jetton_fees_nano})</p>
+    box.innerHTML = `<p>Jetton fees: <b>${(BigInt(s.jetton_fees_nano) / 10n ** 9n).toString()}</b> (nano: ${esc(s.jetton_fees_nano)})</p>
       <p>TON fees accumulated: <b>${(BigInt(s.ton_fees_accumulated) / 10n ** 9n).toString()}</b> TON · withdrawn: ${(BigInt(s.ton_fees_withdrawn) / 10n ** 9n).toString()}</p>
-      <p class="hint">locks: ${s.total_locks} · locked: ${s.locked} · ready: ${s.ready_to_claim}</p>`;
-  } catch (e: any) { box.innerHTML = `<p class="hint err">${e.message}</p>`; }
+      <p class="hint">locks: ${esc(s.total_locks)} · locked: ${esc(s.locked)} · ready: ${esc(s.ready_to_claim)}</p>`;
+  } catch (e: any) { box.innerHTML = `<p class="hint err">${esc(e.message)}</p>`; }
 }
 
 $('btn-wf').addEventListener('click', () => {
@@ -185,14 +218,14 @@ $('btn-wf').addEventListener('click', () => {
     const dest = Address.parse(($('wf-dest') as HTMLInputElement).value.trim());
     const amount = BigInt(Math.round(parseFloat(($('wf-amount') as HTMLInputElement).value) * 1e9));
     showLink($('withdraw-out'), deepLink(withdrawFeesBody(master, dest, amount)), 'Sign with treasury: WithdrawFees');
-  } catch (e: any) { $('withdraw-out').innerHTML = `<p class="hint err">${e.message}</p>`; }
+  } catch (e: any) { $('withdraw-out').innerHTML = `<p class="hint err">${esc(e.message)}</p>`; }
 });
 $('btn-wt').addEventListener('click', () => {
   try {
     const dest = Address.parse(($('wt-dest') as HTMLInputElement).value.trim());
     const amount = toNano(($('wt-amount') as HTMLInputElement).value);
     showLink($('withdraw-out'), deepLink(withdrawTonBody(dest, amount)), 'Sign with treasury: WithdrawTonFees');
-  } catch (e: any) { $('withdraw-out').innerHTML = `<p class="hint err">${e.message}</p>`; }
+  } catch (e: any) { $('withdraw-out').innerHTML = `<p class="hint err">${esc(e.message)}</p>`; }
 });
 
 // ===== events =====
@@ -203,9 +236,9 @@ async function loadEvents() {
     const ev = j.events || [];
     if (!ev.length) { box.innerHTML = '<p class="hint">No events yet</p>'; return; }
     box.innerHTML = `<table><tr><th>id</th><th>type</th><th>lock</th><th>time</th></tr>` +
-      ev.map((e: any) => `<tr><td>${e.id}</td><td>${e.event_type}</td><td>#${e.lock_id}</td><td>${new Date(e.created_at).toLocaleString()}</td></tr>`).join('') +
+      ev.map((e: any) => `<tr><td>${esc(e.id)}</td><td>${esc(e.event_type)}</td><td>#${esc(e.lock_id)}</td><td>${new Date(e.created_at).toLocaleString()}</td></tr>`).join('') +
       `</table>`;
-  } catch (e: any) { box.innerHTML = `<p class="hint err">${e.message}</p>`; }
+  } catch (e: any) { box.innerHTML = `<p class="hint err">${esc(e.message)}</p>`; }
 }
 
 // auto-enter if token exists
