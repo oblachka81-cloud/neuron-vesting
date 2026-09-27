@@ -5,7 +5,10 @@ Lock any TEP-74 jetton on TON with public on-chain proof. Non-custodial. Immutab
 
 [Live App](https://oblachka81-cloud.github.io/neuron-vesting/) · [Telegram Bot](https://t.me/NeuronEcosystemBot) · [Whitepaper v4.0](https://neuron.bothost.tech/whitepaper.html) · [Specification](docs/SPEC.md) · [Security](SECURITY.md)
 
-![Network](https://img.shields.io/badge/network-TON_Mainnet-0098EA) ![Tact](https://img.shields.io/badge/tact-1.6.13-blue) ![Tests](https://img.shields.io/badge/tests-51_passed-green) ![License](https://img.shields.io/badge/license-MIT-green)
+[![TON Mainnet](https://img.shields.io/badge/network-TON%20Mainnet-0098EA?logo=ton&logoColor=white)](https://tonviewer.com/EQBAbjNhuYAfWcZ6cnYXHCNhwOf1VH_OBNfkiAzEPvf7S6iE)
+[![Tact 1.6.13](https://img.shields.io/badge/tact-1.6.13-blue)](https://tact-lang.org/)
+[![Tests](https://img.shields.io/github/actions/workflow/status/oblachka81-cloud/neuron-vesting/compile-tact.yml?branch=main&label=tests)](https://github.com/oblachka81-cloud/neuron-vesting/actions/workflows/compile-tact.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 ---
 
