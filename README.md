@@ -1,23 +1,64 @@
-# NEURON Vesting
+# 🛡️ NEURON Vesting
 
-> Token Lock & Vesting platform on TON — lock any TEP-74 jetton with public on-chain proof.
+> On-chain vesting module of the [NEURON Blockchain Ecosystem](https://neuron.bothost.tech/whitepaper.html).
+> Lock any TEP-74 jetton on TON with public on-chain proof.
+> Non-custodial. Immutable schedule. Zero custody.
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+<p align="center">
+  <a href="https://oblachka81-cloud.github.io/neuron-vesting/"><b>Live App</b></a> ·
+  <a href="https://t.me/NeuronEcosystemBot"><b>Telegram Bot</b></a> ·
+  <a href="https://neuron.bothost.tech/whitepaper.html"><b>Whitepaper</b></a> ·
+  <a href="./docs/SPEC.md"><b>Specification</b></a> ·
+  <a href="./SECURITY.md"><b>Security</b></a>
+</p>
+
+<p align="center">
+  <img alt="Network" src="https://img.shields.io/badge/network-TON%20Mainnet-0098EA?style=flat-square">
+  <img alt="Tact" src="https://img.shields.io/badge/Tact-1.5.4-2b6cb0?style=flat-square">
+  <img alt="Tests" src="https://img.shields.io/badge/tests-51%20passing-4ade80?style=flat-square">
+  <img alt="License" src="https://img.shields.io/badge/license-MIT-blue?style=flat-square">
+</p>
 
 ---
 
-## What is it
+## Part of NEURON Ecosystem
 
-A **non-custodial** smart contract system that lets any TON project or token holder **lock jettons** with a transparent, immutable schedule. Locked tokens **cannot be withdrawn** until the unlock date — that is the whole point.
+**[NEURON](https://neuron.bothost.tech/whitepaper.html)** is a blockchain ecosystem in Telegram with its internal utility token **COGNIQ** on TON. It includes a quiz game, the IMPULSE gaming hub, a bank with staking, a crypto & xStocks exchange, fiat on-ramp, and more — all inside a single Telegram mini app.
 
-**For projects:** lock team tokens, LP tokens, or advisor allocations and publish a verifiable on-chain proof for investors.
+**NEURON Vesting** is the on-chain lock module of that ecosystem. It lets any project or holder lock TEP-74 jettons with a transparent, immutable unlock schedule — and publish a verifiable on-chain proof.
 
-**For holders:** lock your tokens for personal discipline or to participate in platform incentives.
+**Locked tokens cannot be withdrawn until the unlock date.** That is the whole point.
 
-**Non-custodial by design:**
-- Neither the factory, nor the creator, nor the platform can withdraw locked jettons.
-- The beneficiary can claim only after `unlock_at`.
-- The creator can only **extend** the unlock date forward, never shorten it.
+---
+
+## Why NEURON Vesting
+
+- **Non-custodial.** Neither the factory, nor the creator, nor the platform can withdraw locked jettons.
+- **Immutable schedule.** The beneficiary can claim only after `unlock_at`.
+- **Forward-only extension.** The creator can only push the unlock date forward, never shorten it.
+- **On-chain proof.** Every lock is verifiable via the factory's `LockCreated` event and public Vaults dashboard.
+- **TEP-89 discovery.** The wallet resolves its jetton wallet through the jetton master — no assumptions about any specific jetton-wallet implementation.
+- **Self-destruct on completion.** After the final claim, the LockupWallet sweeps its remaining TON to the beneficiary and destroys itself (reclaims storage deposit — no dead dust).
+- **Treasury multisig.** On-chain whitelisting and fee withdrawals are signed via 2-of-3 multisig.
+
+---
+
+## Live on Mainnet
+
+| Contract | Address |
+| --- | --- |
+| **LockupFactory** | [`EQBAbjNhuYAfWcZ6cnYXHCNhwOf1VH_OBNfkiAzEPvf7S6iE`](https://tonviewer.com/EQBAbjNhuYAfWcZ6cnYXHCNhwOf1VH_OBNfkiAzEPvf7S6iE) |
+| **Treasury (2-of-3 multisig)** | [`EQAODQiP22xLiu_ZGxCfaY6o358FX4-G9bE8D_DTKVzjWwEl`](https://tonviewer.com/EQAODQiP22xLiu_ZGxCfaY6o358FX4-G9bE8D_DTKVzjWwEl) |
+| **COGNIQ jetton master** | [`EQDOjRZ5rbSnBBvhsv4g0JNN67p89617_2pNc_AO1dTEkaNg`](https://tonviewer.com/EQDOjRZ5rbSnBBvhsv4g0JNN67p89617_2pNc_AO1dTEkaNg) |
+
+| Resource | URL |
+| --- | --- |
+| Mini app (lock / claim / vaults) | https://oblachka81-cloud.github.io/neuron-vesting/ |
+| Admin panel | https://oblachka81-cloud.github.io/neuron-vesting/admin.html |
+| REST API | https://neuronvesting.bothost.tech |
+| Telegram bot | https://t.me/NeuronEcosystemBot |
+
+**Currently whitelisted:** COGNIQ.
 
 ---
 
@@ -26,31 +67,33 @@ A **non-custodial** smart contract system that lets any TON project or token hol
 Three Tact contracts:
 
 | Contract | Purpose |
-|----------|---------|
-| **`LockupFactory`** | Singleton. Receives jetton transfers with `CreateLock` payload, deploys per-lock `LockupWallet` instances, forwards locked jettons, accumulates platform fees. |
-| **`LockupWallet`** | One instance per lock. Holds the jettons, enforces the schedule, releases to the beneficiary on time. Immutable after deploy. |
-| **`messages.tact`** | Shared TEP-74 message types (imported by both contracts). |
+| --- | --- |
+| **`LockupFactory`** | Singleton. Receives jetton transfers with a `CreateLock` payload, deploys per-lock `LockupWallet` instances, forwards locked jettons, accumulates platform fees. |
+| **`LockupWallet`** | One instance per lock. Holds the jettons, enforces the schedule, releases to the beneficiary on time. Self-destructs after the final claim. |
+| **`messages.tact`** | Shared TEP-74 / TEP-89 message types (imported by both contracts). |
 
 ### Flow
 
 ```
-┌─────────┐   JettonTransfer + CreateLock payload   ┌──────────────┐
-│  User   │ ──────────────────────────────────────▶ │ LockupFactory│
-└─────────┘                                          └──────┬───────┘
-            ┌───────────────────┬────────────────────┐
-            ▼                   ▼                    ▼
-      ┌──────────┐      ┌────────────────    ┌───────────────┐
-      │ Deploy   │      │ Forward jettons│    │ Refund overpay│
-      │ Lockup   │─────▶│ to LockupWallet│    │ to creator    │
-      │ Wallet   │      └────────────────┘    └───────────────┘
-      └────┬─────┘
-           │ (funded)
-           ▼
-      ┌──────────────┐
-      │ LockupWallet │  ◀── Beneficiary claims after unlock_at
-      │ (1 per lock) │  ◀── Creator extends (forward-only)
-      └──────────────┘
-~~~
+
+┌──────────┐   JettonTransfer + CreateLock payload   ┌───────────────┐
+│  User    │ ──────────────────────────────────────▶ │ LockupFactory │
+└──────────┘                                          └───────┬───────┘
+┌───────────────┬─────────────────┬───────┘
+▼               ▼                 ▼
+┌──────────┐    ┌──────────────┐   ┌──────────────┐
+│  Deploy  │    │  Forward     │   │   Refund     │
+│  Lockup  │───▶│  jettons to  │   │   overpay    │
+│  Wallet  │    │  LockupWallet│   │   to creator │
+└────┬─────┘    └──────────────┘   └──────────────┘
+│  (funded)
+▼
+┌──────────────┐
+│ LockupWallet │  ◀── Beneficiary claims after unlock_at
+│ (1 per lock) │  ◀── Creator extends (forward-only)
+└──────────────┘
+
+```
 
 ---
 
@@ -59,11 +102,13 @@ Three Tact contracts:
 ### 1. Create a lock
 
 Any user sends a **jetton transfer** to the `LockupFactory` with:
-- **Amount:** number of jettons to lock
-- **Forward payload:** `CreateLock` structure (`jetton_master`, `beneficiary`, `unlock_at`)
-- **Attached TON:** ≥ **1.25 TON** (1 TON platform fee + 0.25 TON gas buffer)
+
+- **Amount:** number of jettons to lock.
+- **Forward payload:** `CreateLock` structure (`jetton_master`, `beneficiary`, `unlock_at`).
+- **Attached TON:** ≥ 1.15 TON (1 TON platform fee + 0.15 TON gas buffer). Overpay is refunded instantly.
 
 The factory:
+
 1. Validates the sender is a whitelisted jetton wallet.
 2. Charges **0.5% jetton fee** (goes to platform treasury).
 3. Deploys a new `LockupWallet` for this lock.
@@ -73,10 +118,13 @@ The factory:
 ### 2. Claim
 
 After `unlock_at`, the **beneficiary** sends a `Claim` message to the `LockupWallet`:
-- `amount = 0` → claim everything available
-- `amount > 0` → partial claim
+
+- `amount = 0` → claim everything available.
+- `amount > 0` → partial claim.
 
 The wallet transfers jettons to the beneficiary. If the transfer bounces, accounting rolls back automatically.
+
+**Final claim bonus:** when `claimed == total_amount`, the LockupWallet sweeps all remaining TON to the beneficiary and self-destructs.
 
 ### 3. Extend
 
@@ -85,28 +133,29 @@ While the lock is **still locked** (`now() < unlock_at`), the **creator** can se
 ### 4. Withdraw fees
 
 The **treasury** can withdraw:
-- **Jetton fees** — 0.5% accumulated per jetton master, via `WithdrawFees`.
-- **TON fees** — 1 TON per lock, via `WithdrawTonFees`.
+
+- **Jetton fees** — 0.5% accumulated per jetton master (`WithdrawFees`).
+- **TON fees** — 1 TON per lock (`WithdrawTonFees`).
 
 ---
 
 ## Fee structure
 
 | Fee | Amount | Paid by | Destination |
-|-----|--------|---------|-------------|
+| --- | --- | --- | --- |
 | **Platform fee (TON)** | 1 TON per lock | Creator | Factory `ton_fees` → treasury |
-| **Gas buffer** | 0.25 TON per lock | Creator | Consumed by gas |
+| **Gas buffer** | 0.15 TON per lock | Creator | Consumed by gas |
 | **Platform fee (jetton)** | 0.5% of locked amount | Deducted from lock | Factory `fees[master]` → treasury |
 
-Overpay (attach > 1.25 TON) is refunded to the creator.
+Overpay (attach > 1.15 TON) is refunded to the creator immediately.
 
 ---
 
 ## Trust model
 
 | Party | Can | Cannot |
-|-------|-----|--------|
-| **Beneficiary** | Claim after unlock. Reset stuck pending claim after 6h timeout. | Claim before unlock. Claim if not funded. |
+| --- | --- | --- |
+| **Beneficiary** | Claim after unlock. | Claim before unlock. Claim if not funded. |
 | **Creator** | Extend unlock forward (while locked). | Withdraw jettons. Shorten unlock. Extend after unlock. |
 | **Factory** | Deploy `LockupWallet`. Deposit jettons once. Forward overpay. | Withdraw jettons from `LockupWallet`. Reset pending claims. |
 | **Treasury** | Whitelist jetton masters. Withdraw accumulated fees. | Steal locked jettons. Modify existing locks. |
@@ -116,82 +165,11 @@ Overpay (attach > 1.25 TON) is refunded to the creator.
 - Whitelisting jetton masters (registering `jetton_wallet` addresses).
 - Withdrawing accumulated platform fees.
 
-**Treasury compromise impact:** DoS on new lock creation (bad addresses registered). **No theft** of locked jettons. **Mitigation:** multi-sig treasury + off-chain verifier (see `scripts/`).
+**Treasury compromise impact:** DoS on new lock creation (bad addresses registered). **No theft** of locked jettons. **Mitigation:** 2-of-3 multisig treasury + off-chain verifier.
 
 ---
 
-## Invariants
-
-### `LockupFactory`
-
-- **F1.** `next_id` strictly increases, never reused.
-- **F2.** `own_wallets[m]` set ⇔ treasury approved master `m`.
-- **F3.** `wallet_to_master[w] = m` ⇔ `own_wallets[m] = w` (bijection).
-- **F4.** `fees[m]` = sum of all 0.5% cuts for master `m`, minus withdrawals.
-- **F5.** `pending_withdraw[qid]` and `pending_jetton[qid]` set/cleared together.
-- **F6.** `used_qids` monotonic: once true, never false.
-- **F7.** `pending_create[qid]` set at create, cleared on success or bounce.
-- **F8.** `create_jetton[qid]` tracks master for refund on create bounce.
-- **F9.** `ton_fees >= 0` at all times.
-
-### `LockupWallet`
-
-- **I1.** `claimed ∈ [0, total_amount]`.
-- **I2.** `available = total_amount - claimed ≥ 0`.
-- **I3.** At most one claim in-flight (`pending_claim == true`).
-- **I4.** `jetton_wallet` provided at deploy time by the factory.
-- **I5.** Only beneficiary can claim / reset pending.
-- **I6.** Creator can only push `unlock_at` forward, while still locked.
-- **I7.** Bounce restores accounting ONLY if `query_id` matches in-flight claim.
-- **I8.** `total_amount` is immutable — no top-ups change it.
-- **I9.** Claim requires `funded == true`.
-
----
-
-## Known Limitations
-
-### `LockupWallet`
-
-- **L1.** `ResetPendingClaim` does **NOT** roll back `claimed`. If a pending transfer failed silently (bounce lost) after reset, those jettons stay on the contract's jetton wallet, unaccounted and unrecoverable. Conservative trade-off: **stuck-but-safe > recoverable-but-exploitable**.
-- **L2.** Non-factory jetton deposits are accepted but **ignored** (emitted as `UnexpectedDeposit`). They stay on our jetton wallet, unaccounted.
-- **L3.** `total_amount` is fixed at deploy. No top-ups extend it. To add funds, create a new lock.
-
-### `LockupFactory`
-
-- **L1.** Lost fee-withdrawal bounce leaves `pending_withdraw[qid]` set forever. No funds lost; treasury simply uses a new `query_id`.
-- **L2.** Overpay refund goes to `msg.sender` (original owner), not `sender()`.
-- **L3.** If a create-transfer bounces, factory refunds to the creator and emits `LockCreationFailed`. The `LockupWallet` stays deployed but empty. Frontends should filter locks whose `lock_id` appears in a `LockCreationFailed` event.
-
----
-
-## Security
-
-### Reporting a vulnerability
-
-If you discover a security issue, please **do not open a public issue**. Instead:
-
-- **Email:** oblacka81@gmail.com
-- **Telegram:** NEURON Support — [@animaneuri](https://t.me/animaneuri)
-- **GitHub Security Advisories:** [Report privately](https://github.com/oblachka81-cloud/neuron-vesting/security/advisories/new)
-
-We will acknowledge receipt within **48 hours** and aim to provide a fix within **7 days**.
-
-### Audit status
-
-- [x] Internal review: two independent code reviews, all critical findings fixed (v2.5.1 / v2.6.1).
-- [x] **55 automated sandbox tests** covering happy paths, bounces, access control, time boundaries, and fee handling.
-- [ ] **Not yet formally audited externally.** Initial mainnet deployment uses **platform-owned funds only** (self-test locks). A formal external audit is planned **before onboarding third-party projects**.
-
-### Best practices for users
-
-- **Verify the factory address** before sending jettons.
-- **Verify the beneficiary address** in the `LockCreated` event.
-- **Check `jetton_wallet`** matches your expected jetton master.
-- **Do not send jettons directly** to a `LockupWallet` — they will be ignored.
-
----
-
-## Development
+## Quick start
 
 ### Prerequisites
 
@@ -204,93 +182,167 @@ We will acknowledge receipt within **48 hours** and aim to provide a fix within 
 npm install
 ```
 
-### Compile
+Compile
 
 ```bash
 npm run check    # type-check only
 npm run build    # full build to build/
 ```
 
-### Test
+Test
 
 ```bash
-npm test
+npm test         # 51 sandbox tests via Jest + @ton/sandbox
 ```
 
-### Project structure
+Add a jetton to the on-chain whitelist
 
-~~~
+```bash
+FACTORY_ADDRESS=EQBAbjNhuYAfWcZ6cnYXHCNhwOf1VH_OBNfkiAzEPvf7S6iE \
+npx tsx scripts/add-jetton.ts <JETTON_MASTER_ADDRESS>
+```
+
+Prints a ready-to-sign SetJettonWallet body for multisig.ton.org. Sign with 2 of 3 treasury keys.
+
+---
+
+Project structure
+
+```
 contracts/
-├── lockup_factory.tact   # Singleton factory
-├── lockup_wallet.tact    # Per-lock wallet
-└── messages.tact         # Shared TEP-74 message types
+├── lockup_factory.tact       # LockupFactory v5.0.0
+├── lockup_wallet.tact        # LockupWallet v5.0.0
+└── messages.tact             # Shared TEP-74 / TEP-89 messages
+
 tests/
-└── vesting.spec.ts       # 55 sandbox tests
+└── vesting.spec.ts           # 51 sandbox tests
+
 scripts/
-├── deployFactory.ts          # Deploy factory to testnet/mainnet
-└── verify-jetton-wallets.ts  # Off-chain verifier
+├── deploy-mainnet.ts         # Deploy LockupFactory to mainnet
+├── add-jetton.ts             # Generate SetJettonWallet body for multisig
+└── gen-rescue.ts             # Generate treasury withdraw / rescue orders
+
+bot/
+├── index.cjs                 # Entry: HTTP + Telegram bot + indexer
+├── indexer.js                # Polls factory + wallet events → PostgreSQL
+├── api.js                    # REST API (locks, whitelist, admin)
+├── auth.js                   # Admin session management
+└── db.js                     # PostgreSQL schema + queries
+
+web/
+├── index.html                # Main mini app
+├── admin.html                # Admin panel
+├── main.ts                   # Entry: TonConnect + tabs
+├── wizard.ts                 # Create lock UI
+├── cabinet.ts                # My Locks / Applications / Whitelist / Vaults
+├── admin.ts                  # Admin panel logic
+├── ton.ts                    # Claim body builder + jetton wallet resolver
+├── price.ts                  # Live prices for whitelist cards
+└── config.ts                 # API URL, factory address, network
+
+.github/workflows/
+├── compile-tact.yml          # Build & test on every push
+├── deploy-mainnet.yml        # Manual factory deployment
+├── deploy-pages.yml          # Publish mini app to GitHub Pages
+└── check-jetton.yml          # Manual on-chain whitelist check
 ```
 
 ---
 
-## Deployment
+REST API
 
-### Testnet
-
-| Contract | Address |
-|----------|---------|
-| LockupFactory | `<TBD — legacy testnet factory exists; v2.5.1 redeploy pending>` |
-
-### Mainnet
-
-| Contract | Address |
-|----------|---------|
-| LockupFactory | `<TBD — filled after deploy>` |
-
-### Deploy commands
-
-```bash
-# Testnet
-npx tsx scripts/deployFactory.ts --network testnet
-
-# Mainnet (platform-owned funds self-test first)
-npx tsx scripts/deployFactory.ts --network mainnet
-```
+Endpoint Method Description
+/health GET Service status + factory address
+/api/locks?wallet=<addr> GET Locks where the wallet is creator or beneficiary
+/api/locks/public GET Public vaults summary + COGNIQ price
+/api/locks/by-jetton?master=<addr> GET Locks for a specific jetton master
+/api/whitelist GET Approved jettons
+/api/jetton/<master>/icon GET Jetton icon (via TonAPI)
+/api/applications POST Submit a whitelist application
+/api/applications/status/<id> GET Application status
+/api/admin/* various Admin operations (login, approve, reject, withdraw bodies)
 
 ---
 
-## Tech stack
+Contract versions
 
-- Contracts: Tact 1.5.4 on TON
-- Build: tact CLI
-- Test: Jest + @ton/sandbox
-- CI: GitHub Actions — compile + 55 tests on every push
-- Indexer: Express + PostgreSQL
-- Frontend: Vite + TonConnect (mini app + public web pages)
+Current: v5.0.0 (LockupFactory + LockupWallet).
 
----
+Changelog v5.0.0:
 
-## Roadmap
+· LockupWallet: self-destruct after final claim; remaining TON swept to beneficiary (mode: 128 + 32 + 2).
+· LockupFactory: DEPLOY_GAS reduced 0.15 → 0.12 TON; bounce refund now returns both platform fee and gas buffer; JettonExcesses accepted silently (no-op).
+· TEP-89 discovery: unchanged — wallet resolves its own jetton wallet via master, no StateInit assumptions.
 
-- [x] v2.5.1 / v2.6.1 — audit fixes, 55 tests, green CI
-- [x] Documentation: README, SECURITY.md, docs/SPEC.md
-- [ ] Off-chain jetton-wallet verifier in CI
-- [ ] Mainnet deployment (platform-owned funds self-test)
-- [ ] Multi-sig treasury
-- [ ] Formal external audit
-- [ ] Onboarding third-party projects
-- [ ] v3: rescue mechanism for stuck jettons (time-locked, factory-only)
+See docs/SPEC.md for the full specification, invariants, and known limitations.
 
 ---
 
-## License
+Roadmap
 
-MIT © NEURON Vesting
+✅ Shipped (v5.0.0)
+
+· LockupFactory + LockupWallet on TON mainnet
+· COGNIQ on-chain whitelisted via treasury multisig
+· TEP-89 jetton-wallet discovery
+· Self-destruct after final claim (no dead dust)
+· add-jetton.ts CLI + admin multisig body generator
+· Public Vaults dashboard
+· Indexer + REST API + Telegram bot
+· 51 automated sandbox tests
+· CI: build + test on every push, Pages auto-deploy
+
+🔜 Next
+
+· Extend UI — contract supports forward-only extension; UI for it is pending.
+· Partial claim UI — contract supports amount > 0; UI currently sends full claim only.
+· Multi-jetton UI — end-to-end flow for onboarding new jettons without manual multisig steps.
+· Off-chain jetton-wallet verifier — CI check that own_wallets[master] matches the actual jetton wallet.
+· Formal external audit — planned before onboarding third-party projects.
+
+🔮 Future (v6+)
+
+· Batch lock creation
+· Time-locked admin rescue for stuck jettons
+· Multi-beneficiary vesting schedules
+· On-chain proof explorer (standalone)
 
 ---
 
-## Links
+Tech stack
 
-- Repository: https://github.com/oblachka81-cloud/neuron-vesting
-- Contract spec: [docs/SPEC.md](./docs/SPEC.md)
-- Security policy: [SECURITY.md](./SECURITY.md)
+· Contracts: Tact 1.5.4 on TON
+· Build: tact CLI
+· Tests: Jest + @ton/sandbox
+· CI: GitHub Actions
+· Backend: Node.js 22 · Express · PostgreSQL
+· Frontend: Vite · TypeScript · TonConnect UI
+· Hosting: GitHub Pages (frontend) · Bothost (backend)
+
+---
+
+Security
+
+Security policy, scope, and reporting instructions: SECURITY.md.
+
+Current status:
+
+· Internal review: independent review by four AI code-analysis agents. All critical findings addressed in v2.5.1 / v2.6.1 / v5.0.0.
+· Automated tests: 51 sandbox tests covering happy paths, bounces, access control, time boundaries, and fee handling.
+· External audit: not yet performed. Planned before onboarding third-party projects.
+
+---
+
+Documentation
+
+· docs/SPEC.md — full contract specification, invariants, message opcodes.
+· SECURITY.md — vulnerability reporting, scope, current audit status.
+· NEURON Whitepaper — full ecosystem documentation.
+
+---
+
+License
+
+MIT © NEURON Blockchain Ecosystem — see LICENSE.
+
+----
