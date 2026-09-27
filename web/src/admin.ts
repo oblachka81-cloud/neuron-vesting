@@ -169,7 +169,11 @@ admin: ${d.revoked ? '✅ zero (revoked)' : '⚠️ ' + esc(d.admin.toString())}
       try {
         const apps = (await api('/api/admin/applications')).applications;
         const a = apps.find((x: any) => x.id === id);
-        const ok = String(m.jetton_master || '').toLowerCase() === String(a?.jetton_master || '').toLowerCase();
+        const norm = (s: any) => {
+      try { return Address.parse(String(s)).toRawString(); }
+      catch { return String(s || '').toLowerCase(); }
+     };
+      const ok = norm(m.jetton_master) === norm(a?.jetton_master);
         matchLine = `<p><b>Master in body:</b> <code>${esc(m.jetton_master)}</code> ${
           ok ? '<span class="ok">✅ совпадает с заявкой</span>'
              : '<span class="err">❌ НЕ СОВПАДАЕТ — НЕ ПОДПИСЫВАЙ</span>'}</p>`;
