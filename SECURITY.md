@@ -1,72 +1,85 @@
-# Security Policy
+# 🛡️ Security Policy
 
-## Reporting a vulnerability
+**Project:** NEURON Vesting  
+**Current Version:** v5.0.0  
+**Last Updated:** 2026  
 
-**Please do not report security issues through public GitHub issues.**
+---
 
-Instead, use one of the following channels:
+## 📩 Reporting a Vulnerability
 
-- **GitHub Security Advisories:** [Submit privately](https://github.com/oblachka81-cloud/neuron-vesting/security/advisories/new)
-- **Email:** oblacka81@gmail.com
-- **Telegram:** NEURON Support — [@animaneuri](https://t.me/animaneuri)
+Please **do not** report security issues through public GitHub issues. 
 
-### What to include
+Instead, use one of the following secure channels:
 
-- Description of the vulnerability
-- Steps to reproduce (PoC if possible)
-- Impact assessment (who is affected, what can be lost)
-- Suggested fix (optional)
+1. **GitHub Security Advisories**: [Submit a private report](https://github.com/oblachka81-cloud/neuron-vesting/security/advisories/new) *(Recommended)*
+2. **Email**: [oblacka81@gmail.com](mailto:oblacka81@gmail.com)
+3. **Telegram**: NEURON Support — [@animaneuri](https://t.me/animaneuri)
 
-### Response timeline
+### What to include in your report:
+- 📝 **Description** of the vulnerability.
+- 🔄 **Steps to reproduce** (Proof of Concept / code snippet if possible).
+- ⚠️ **Impact assessment** (who is affected, what can be lost or disrupted).
+- 💡 **Suggested fix** (optional, but highly appreciated).
+
+---
+
+## ⏱️ Response Timeline
 
 | Stage | Timeline |
-|-------|----------|
-| Acknowledgement | Within **48 hours** |
-| Initial assessment | Within **5 days** |
-| Fix or mitigation | Within **7–14 days** depending on severity |
-| Public disclosure | After fix is deployed and users are notified |
+| :--- | :--- |
+| **Acknowledgement** | Within 48 hours |
+| **Initial Assessment** | Within 5 business days |
+| **Fix or Mitigation** | Within 7–14 days (depending on severity) |
+| **Public Disclosure** | After the fix is deployed and users are notified |
 
-We will **credit** reporters in the release notes unless they prefer to remain anonymous.
-
----
-
-## Scope
-
-### In scope
-
-- `LockupFactory` and `LockupWallet` smart contracts
-- Deploy scripts and CI configuration
-- Off-chain indexer and verifier scripts
-
-### Out of scope
-
-- Frontend — report to the frontend maintainers
-- Third-party jetton masters or wallets
-- TON network itself
-- Social engineering of team members
+> *We will publicly credit security researchers in our release notes, unless they prefer to remain anonymous.*
 
 ---
 
-## Known security considerations
+## 🎯 Scope
 
-See [README.md § Known Limitations](./README.md#known-limitations) for documented trade-offs.
+### ✅ In Scope
+- `LockupFactory` and `LockupWallet` Tact smart contracts.
+- Deploy scripts and GitHub Actions CI configuration.
+- Off-chain indexer, REST API, and verifier scripts (`bot/` directory).
 
-### Trust model summary
-
-- **Treasury:** trusted for whitelisting jettons and withdrawing fees. A compromised treasury can DoS new locks but **cannot steal** locked jettons.
-- **Factory:** cannot withdraw jettons from `LockupWallet`.
-- **Creator:** can only extend unlock forward. Cannot withdraw.
-- **Beneficiary:** can claim after unlock. Cannot claim early.
-
-### Bug bounty
-
-**No formal bug bounty is currently in place.** We aim to launch one after mainnet deployment and external audit. Until then, we encourage responsible disclosure and will credit researchers publicly.
+### ❌ Out of Scope
+- Frontend UI/UX issues (report to frontend maintainers).
+- Vulnerabilities in third-party TEP-74 jetton masters or wallets.
+- The TON network protocol itself.
+- Social engineering or phishing attempts targeting team members.
 
 ---
 
-## Audit status
+## 🛡️ Trust Model Summary
 
-- [x] Internal review: two independent code reviews, all critical findings fixed (v2.5.1 / v2.6.1).
-- [x] 55 automated sandbox tests.
-- [ ] Multi-sig treasury: **planned**.
-- [ ] External formal audit: **planned before onboarding third-party projects**.
+For detailed invariants, see [docs/SPEC.md § 9. Trust Model](docs/SPEC.md).
+
+| Party | Capabilities | Limitations |
+| :--- | :--- | :--- |
+| **Treasury** | Whitelist jettons, withdraw accumulated fees. | **Cannot** steal locked jettons or modify existing locks. |
+| **Factory** | Deploy wallets, forward jettons, refund overpay. | **Cannot** withdraw jettons from a deployed `LockupWallet`. |
+| **Creator** | Extend unlock date forward (while locked). | **Cannot** withdraw, shorten time, or extend after unlock. |
+| **Beneficiary** | Claim after `unlock_at`, reset stuck pending claims. | **Cannot** claim before unlock or if the lock is unfunded. |
+
+> **⚠️ Treasury Compromise Impact:** A compromised treasury can cause a DoS on *new* lock creation (by registering bad addresses). It **cannot** steal already locked jettons. Mitigated by a live **2-of-3 multisig** setup.
+
+---
+
+## 🐛 Bug Bounty
+
+No formal paid bug bounty program is currently active. We aim to launch one after the external formal audit is completed. Until then, we strongly encourage **responsible disclosure** and will publicly credit all verified researchers who help us secure the protocol.
+
+---
+
+## 🔍 Audit & Security Status
+
+- ✅ **Internal Review:** Independent code reviews conducted by four AI code-analysis agents. All critical findings were addressed and resolved in versions leading up to `v5.0.0`.
+- ✅ **Automated Testing:** 51 comprehensive sandbox tests covering happy paths, bounce handling, access control, time boundaries, and fee logic.
+- ✅ **Treasury Security:** Live 2-of-3 multisig wallet controlling whitelisting and fee withdrawals.
+- 🔜 **External Formal Audit:** Planned and scheduled before onboarding any third-party projects to the whitelist.
+
+---
+
+*For a detailed list of known limitations and design trade-offs, please refer to [README.md § Known Limitations](README.md) and [docs/SPEC.md § 8](docs/SPEC.md).*
