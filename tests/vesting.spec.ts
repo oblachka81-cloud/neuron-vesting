@@ -806,10 +806,12 @@ describe('NEURON Vesting — v4 (isolated + TEP-89)', () => {
         });
     });
 
-    // ═══════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════
 // v5.0.1 — JettonExcesses from either side of the TEP-74 transfer chain
+// ═══════════════════════════════════════════════════════════════════
 
-it('52. Excesses from beneficiary_wallet settles claim + sweeps + self-destructs', async () => {
+describe('LockupWallet: v5.0.1 Excesses from either side', () => {
+    it('52. Excesses from beneficiary_wallet settles claim + sweeps + self-destructs', async () => {
     const unlockAt = BigInt(blockchain.now! + 100);
     const wallet = blockchain.openContract(
         await LockupWallet.fromInit(
@@ -973,4 +975,5 @@ it('55. Excesses before any claim -> success, no sweep (pending_claim = false)',
     const state = await blockchain.getContract(wallet.address);
     expect(state.balance).toBeGreaterThan(0n);
   });
-}); 
+ }); 
+});
