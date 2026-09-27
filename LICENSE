@@ -1,6 +1,16 @@
+# MIT License
+
+**NEURON Vesting** — Copyright © 2026 NEURON Blockchain Ecosystem  
+**Author:** oblachka81-cloud  
+**Project:** [neuron-vesting](https://github.com/oblachka81-cloud/neuron-vesting)
+
+---
+
+##  License Text
+
 MIT License
 
-Copyright (c) 2026 oblachka81-cloud
+Copyright (c) 2026 NEURON Blockchain Ecosystem
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -19,3 +29,31 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+---
+
+## ✅ Permissions
+- ✔️ Commercial use
+- ✔️ Modification
+- ✔️ Distribution
+- ✔️ Private use
+- ✔️ Sublicensing
+
+## ❌ Limitations
+- ️ Liability
+- ✖️ Warranty
+
+## ️ Conditions
+- 📄 License and copyright notice must be included
+
+---
+
+## 🔗 Related Links
+- [README](README.md) — Project overview and quick start
+- [Specification](docs/SPEC.md) — Technical contract specification
+- [Whitepaper](https://neuron.bothost.tech/whitepaper.html) — NEURON Ecosystem documentation
+- [Security Policy](SECURITY.md) — Vulnerability reporting guidelines
+
+---
+
+*This is a permissive open-source license. For legal advice, consult a professional.*
