@@ -4,7 +4,7 @@ const TOKEN = (process.env.BOT_TOKEN || '').trim();
 if (!TOKEN) { console.error('BOT_TOKEN is not set'); process.exit(1); }
 
 const API = 'https://api.telegram.org/bot' + TOKEN;
-const FACTORY = process.env.FACTORY_ADDRESS || 'kQAhTRlJwkdR2vYdXz-RowoEGum_ITUZZFj6gdKdSggfjnNh';
+const FACTORY = process.env.FACTORY_ADDRESS || 'EQC1Y_OfkDqKiBh0nBzuKvbvSqIipcbswf_x7nuglJ9LZdBp';
 const MINI_APP_URL = process.env.MINI_APP_URL || 'https://oblachka81-cloud.github.io/neuron-vesting/';
 const PORT = parseInt(process.env.PORT || '3000', 10);
 
