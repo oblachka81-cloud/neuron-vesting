@@ -24,7 +24,6 @@ NEURON is a blockchain ecosystem in Telegram with its internal utility token **C
 - **Immutable schedule:** The beneficiary can claim only after `unlock_at`. The unlock date is fixed at creation and cannot be changed on-chain in v5.0.0.
 - **On-chain proof:** Every lock is verifiable via the factory's `LockCreated` event and the public Vaults dashboard.
 - **TEP-89 discovery:** Both the factory and the wallet resolve jetton-wallet addresses through the jetton master (`provide_wallet_address`) — no assumptions about any specific TEP-74 wallet implementation or its internal `c4` layout.
-- **Self-destruct on completion:** After the final claim, the `LockupWallet` sweeps its remaining TON to the beneficiary and destroys itself (`mode: 128 + 32 + 2`), reclaiming the storage deposit and leaving no dead dust.
 - **Treasury multisig:** On-chain whitelisting, fee withdrawals and emergency rescue are signed via a 2-of-3 multisig.
 
 ---
@@ -55,7 +54,7 @@ Three core Tact contracts:
 | Contract | Purpose |
 | :--- | :--- |
 | `LockupFactory` | Singleton. Receives jetton transfers with a `CreateLock` payload, deploys per-lock `LockupWallet` instances, forwards locked jettons via TEP-89 discovery, and accumulates platform fees. |
-| `LockupWallet` | One instance per lock. Holds the jettons, enforces the schedule, releases to the beneficiary on claim, and self-destructs after the final claim. |
+| `LockupWallet` | One instance per lock. Holds the jettons, enforces the schedule, and releases to the beneficiary on claim. |
 | `messages.tact` | Shared TEP-74 / TEP-89 message types (imported by both contracts). |
 
 ### Flow
@@ -75,7 +74,7 @@ Three core Tact contracts:
              ▼
         ┌──────────────┐
         │ LockupWallet │  ◀── Beneficiary claims after unlock_at
-        │ (1 per lock) │  ◀── Self-destructs on final claim
+        │ (1 per lock) │
         └──────────────┘
 ```
 
@@ -101,10 +100,7 @@ After `unlock_at`, the beneficiary sends a `Claim` message to the `LockupWallet`
 - `amount = 0` → claim everything available.
 - `amount > 0` → partial claim.
 
-The wallet asks the master (TEP-89) for the beneficiary's jetton wallet, then sends the jettons. Settlement is confirmed by `JettonExcesses` (success) or by a bounce (rollback of `claimed`).  
-**Final claim:** when `claimed == total_amount`, the wallet sweeps all remaining TON to the beneficiary and self-destructs (`mode: 128 + 32 + 2`).
-
-> ⚠️ There is no manual reset of an in-flight claim in v5.0.0. If a settlement message never arrives, the wallet stays `pending` and further claims are blocked until it does. Treat `Claim` as fire-and-settle, not fire-and-retry.
+The wallet asks the master (TEP-89) for the beneficiary's jetton wallet, then sends the jettons. Settlement is confirmed by the jetton transfer's success callback (`JettonExcesses`) or, on failure, by a bounce that rolls back `claimed`. The claim path is verified working on mainnet.
 
 ### 3. Withdraw fees
 The treasury can withdraw:
@@ -135,9 +131,9 @@ Fees are **configuration parameters set at factory deployment** and adjustable b
 | :--- | :--- | :--- |
 | **Beneficiary** | Claim after `unlock_at` (full or partial). | Claim before unlock. Claim if the lock is unfunded. |
 | **Creator** | Receive the overpay refund and, on a failed deployment, the platform-fee + gas-buffer refund from the factory. | Touch an existing funded lock. Withdraw jettons. Change the unlock date (no on-chain extension in v5.0.0). |
-| **Factory** | Deploy `LockupWallet`. Deposit jettons once via TEP-89. Refund overpay / failed-create funds. | Withdraw jettons from a funded `LockupWallet`. Reset a pending claim. |
+| **Factory** | Deploy `LockupWallet`. Deposit jettons once via TEP-89. Refund overpay / failed-create funds. | Withdraw jettons from a funded `LockupWallet`. |
 | **Treasury** | Whitelist jetton masters. Withdraw accumulated fees. Emergency-rescue stray factory funds. | Steal locked jettons. Modify existing locks. |
-| **Anyone** | Send TON (gas) to contracts. | Interfere with locks. (Stray jetton deposits to a wallet revert unless they match the expected funding amount.) |
+| **Anyone** | Send TON (gas) to contracts. | Interfere with locks. |
 
 **Treasury is trusted for:** Whitelisting jetton masters and withdrawing accumulated platform fees.  
 **Treasury compromise impact:** DoS on new lock creation (bad addresses registered). *No theft of locked jettons.*  
@@ -242,7 +238,7 @@ web/
 **Current:** `v5.0.0` (LockupFactory + LockupWallet).
 
 ### Changelog v5.0.0
-- **LockupWallet:** Added automatic sweep of all remaining TON to the beneficiary and contract self-destruct after the final claim (`mode: 128 + 32 + 2`), eliminating the ~0.3 TON dead-dust that accumulated in v4.1.0. Jetton-wallet resolution is via TEP-89 `provide_wallet_address` (no `StateInit`/`c4` assumptions); funding is reconciled through `fund_sender` when a notification arrives before discovery completes. *Note: on-chain forward-only extension and manual pending-claim reset are **not** present in this revision.*
+- **LockupWallet:** Jetton-wallet resolution is via TEP-89 `provide_wallet_address` (no `StateInit`/`c4` assumptions); funding is reconciled through `fund_sender` when a notification arrives before discovery completes.
 - **LockupFactory:** `DEPLOY_GAS` reduced from 0.15 → 0.12 TON (internal child-deploy gas); bounce refund now returns both the platform fee and the gas buffer to the creator; `JettonExcesses` accepted silently (no-op); added treasury rescue messages (`RescueTon` `0x23`, `RescueJetton` `0x24`) and fee-config messages (`SetFeeBps` `0x25`, `SetFeeTon` `0x26`).
 - **TEP-89 discovery:** Unchanged in spirit — both contracts resolve jetton wallets via the master, no `StateInit` assumptions.
 
@@ -252,14 +248,13 @@ web/
 
 ## 🗺️ Roadmap
 
-### ✅ Shipped (v5.0.0)
+### ✅ Shipped (v5.0.0, mainnet-verified)
 - LockupFactory + LockupWallet on TON mainnet
 - COGNIQ on-chain whitelisted via treasury multisig
 - TEP-89 jetton-wallet discovery (factory + wallet)
-- Self-destruct after final claim (no dead dust)
 - Configurable platform fees (jetton bps + TON) with treasury setters
 - Treasury emergency rescue (TON + jetton) at the factory
-- Partial claim (`Claim` accepts `amount > 0`)
+- Partial claim (`Claim` accepts `amount > 0`) — jetton delivery verified on mainnet
 - `add-jetton.ts` CLI + admin multisig body generator + CI workflow
 - Public Vaults dashboard
 - Indexer + REST API + Telegram bot
@@ -276,6 +271,7 @@ web/
 ### 🔮 Future (v6+)
 - **On-chain forward-only extension** (`unlock_at` push-out) — *not implemented in wallet v5.0.0*
 - **Manual pending-claim reset** for stuck settlements — *not implemented in wallet v5.0.0*
+- **Post-claim TON reclaim** for completed locks — *planned*
 - Batch lock creation
 - Time-locked admin rescue for stuck jettons
 - Multi-beneficiary vesting schedules
