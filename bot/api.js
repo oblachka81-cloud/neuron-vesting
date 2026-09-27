@@ -15,7 +15,17 @@ function getTonClient() {
   return _tonClient;
 }
 
+// Monotonic treasury query_id. Date.now() alone collides on two calls in the
+// same millisecond -> second multisig order refused by used_qids ("qid reused").
+// Cross-process collision with the frontend in the same wall-clock ms is ~0 and
+// benign (one order refused, no funds lost); intra-process is the real risk.
+let _qidSeq = 0;
+function nextQid() { return BigInt(Date.now()) * 1000n + BigInt(_qidSeq++); }
+
 // ===== Price Cache (update every 5 mins) =====
+// NOTE: hardcoded to COGNIQ on purpose for now. Universal per-jetton pricing is
+// a separate track and must land together with the frontend Vaults renderer that
+// consumes per-jetton price. Do not "fix" here in isolation.
 let priceCache = { price: 0.001286, updated: 0 };
 
 async function getCogniqPrice() {
@@ -99,6 +109,13 @@ function json(res, code, body) {
   res.end(JSON.stringify(body));
 }
 
+// Per-field length caps for untrusted public input (DoS / DB bloat guard).
+// These are NOT a substitute for column limits in db.js — exact schema bounds
+// live there; this only rejects absurdly large payloads before they reach SQL.
+const LIMITS = { applicant_name: 120, project_url: 512, notes: 2000, telegram_id: 64 };
+function overLimit(v, max) { return v != null && (typeof v !== 'string' || v.length > max); }
+function isAddr(s) { try { Address.parse(s); return true; } catch { return false; } }
+
 // ===== routes =====
 async function addRoutes(req, res) {
   const url = new URL(req.url, 'http://localhost');
@@ -157,6 +174,14 @@ async function addRoutes(req, res) {
       const body = JSON.parse(await readBody(req));
       if (!body.jetton_master || !body.applicant) {
         return json(res, 400, { error: 'jetton_master and applicant required' });
+      }
+      // Validate addresses up front: a malformed master would otherwise sit in
+      // the queue forever (approve throws on Address.parse and can't be cleared).
+      if (!isAddr(body.jetton_master)) return json(res, 400, { error: 'invalid jetton_master' });
+      if (!isAddr(body.applicant)) return json(res, 400, { error: 'invalid applicant' });
+      // Reject absurdly long untrusted strings before they hit the DB.
+      for (const k of Object.keys(LIMITS)) {
+        if (overLimit(body[k], LIMITS[k])) return json(res, 400, { error: k + ' too long' });
       }
       const row = await db.insertApplication({
         jetton_master: body.jetton_master,
@@ -240,7 +265,7 @@ async function addRoutes(req, res) {
       ]);
       const factoryJW = res1.stack.readCell().beginParse().loadAddress();
 
-      const qid = BigInt(Date.now());
+      const qid = nextQid();
       const txBody = beginCell()
         .storeUint(0x21, 32)
         .storeUint(qid, 64)
@@ -255,6 +280,7 @@ async function addRoutes(req, res) {
           target: FACTORY.toString(),
           value: '0.1',
           query_id: qid.toString(),
+          jetton_master: master.toString(), // frontend cross-checks vs the app row
           factory_jetton_wallet: factoryJW.toString(),
           body_base64: txBody.toBoc().toString('base64'),
         },
