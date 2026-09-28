@@ -1,9 +1,17 @@
 // ═══════════════════════════════════════════════════════════════════════════
-// NEURON Vesting — LockupWallet v5.0.2
+// NEURON Vesting — LockupWallet v5.0.3
 // ───────────────────────────────────────────────────────────────────────────
 // One LockupWallet per lock. Holds jettons after the factory forwards them
 // into the wallet's deterministic jetton wallet, enforces the unlock
 // schedule, and releases jettons to the beneficiary on claim.
+//
+// Changelog v5.0.3:
+//   - SECURITY FIX (Finding #4): Added replay guard for TakeWalletAddress flow 2.
+//     Prevents malicious/broken masters from triggering multiple JettonTransfer
+//     dispatches for a single pending_claim via repeated TEP-89 replies.
+//     Mirrors the consumed_forward fix in LockupFactory v5.0.3.
+//   - DEFENSE-IN-DEPTH: Added sender check in bounced handler for consistency
+//     with factory bounce logic (though TVM guarantees origin binding).
 //
 // Changelog v5.0.2:
 //   - Static-analysis cleanup (Misti --all-detectors): replaced raw integer
@@ -57,6 +65,8 @@
 //   I5. Claims are atomic: at most one pending claim per wallet
 //   I6. After successful claim completion, all remaining TON balance is
 //       returned to beneficiary and contract self-destructs (no dust left)
+//   I7. [V5.0.3] At most one JettonTransfer dispatch per pending_claim lifecycle
+//       (replay guard against duplicate TakeWalletAddress from master)
 //
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -78,7 +88,7 @@ message(0x31) StartDiscovery {
     query_id: Int as uint64;
 }
 
-// ─── Events ────────────────────────────────────────────────────────────────
+// ─── Events ───────────────────────────────────────────────────────────────
 
 /// Emitted when the wallet receives the exact expected amount.
 message(0x124) LockFunded {
@@ -110,13 +120,9 @@ const WALLET_DISCOVERY_GAS: Int = ton("0.05");
 const CLAIM_GAS: Int = ton("0.05");
 
 /// `forward_ton_amount` for the claim JettonTransfer. A non-zero value is
-/// required by TEP-74 jetton wallets to emit a JettonNotification to the
-/// destination's owner; 1 nanoton is the canonical minimum.
+/// required by TEP-74 jetton wallets to emit a notification. 1 nanoton is
+/// the canonical minimum.
 const CLAIM_FORWARD: Int = ton("0.01");
-
-/// Non-empty forward payload. Some TEP-74 implementations (e.g. COGNIQ)
-/// enforce `forward_payload.bits() >= 1` and revert with exit code 708 on
-/// an empty slice. A single zero bit is the minimal valid payload.
 
 // ─── Contract ─────────────────────────────────────────────────────────────
 
@@ -151,6 +157,13 @@ contract LockupWallet {
     pending_claim: Bool;
     pending_amount: Int as coins;
     pending_query_id: Int as uint64;
+
+    // ── Replay guard for claim dispatch (I7 / V5.0.3 FIX #4) ───────────
+    /// Tracks which pending_query_ids have already had their JettonTransfer
+    /// dispatched. Prevents duplicate dispatches from repeated TakeWalletAddress
+    /// responses (malicious/buggy master). Cleared alongside pending_* on
+    /// settlement (excesses) or rollback (bounce).
+    consumed_claim: map<Int, Bool>;
 
     init(
         lock_id: Int,
@@ -215,6 +228,14 @@ contract LockupWallet {
             && msg.query_id == self.pending_query_id) {
 
             require(self.jetton_wallet != null, "no wallet");
+
+            // [V5.0.3 FIX #4] REPLAY GUARD: Drop duplicate TakeWalletAddress
+            // responses for the same pending_query_id. Prevents multiple
+            // JettonTransfer dispatches caused by malicious/buggy masters.
+            if (self.consumed_claim.get(self.pending_query_id) != null) { return; }
+
+            // Mark claim as consumed BEFORE mutating state/sending (atomicity).
+            self.consumed_claim.set(self.pending_query_id, true);
 
             // v5.0.1: cache the beneficiary's jetton wallet so the success
             // excesses it returns (TEP-74 copies response_destination into
@@ -363,6 +384,10 @@ contract LockupWallet {
             self.pending_claim = false;
             self.pending_amount = 0;
             self.pending_query_id = 0;
+            
+            // [V5.0.3 FIX #4] CLEAR REPLAY GUARD on settlement.
+            // Allows beneficiary to reuse qid in a future Claim without hitting stale guard.
+            self.consumed_claim.set(msg.query_id, null);
 
             // AUDIT v5: If this was the final claim (all funds claimed),
             // sweep all remaining TON to beneficiary and self-destruct.
@@ -381,11 +406,21 @@ contract LockupWallet {
 
     /// Jetton transfer failed: roll back `claimed` and clear pending state.
     bounced(msg: bounced<JettonTransfer>) {
+        // [V5.0.3 MINOR] Defense-in-depth: verify bounce origin matches our JW.
+        // While TVM cryptographically binds bounce to outbound message, this
+        // mirrors factory pattern and eliminates theoretical edge-case confusion.
+        require(sender() == self.jetton_wallet, "bounce from wrong wallet");
+
         if (self.pending_claim && msg.query_id == self.pending_query_id) {
             self.claimed = self.claimed - self.pending_amount;
             self.pending_claim = false;
             self.pending_amount = 0;
             self.pending_query_id = 0;
+            
+            // [V5.0.3 FIX #4] CLEAR REPLAY GUARD on rollback.
+            // Same rationale as excesses: allow qid reuse after failure.
+            self.consumed_claim.set(msg.query_id, null);
+            
             emit(ClaimBounced{
                 lock_id: self.lock_id,
                 amount: msg.amount
@@ -413,5 +448,11 @@ contract LockupWallet {
             return 0;
         }
         return self.total_amount - self.claimed;
+    }
+    
+    // [V5.0.3 NEW GETTER] Diagnostic access to replay guard state.
+    get fun isClaimConsumed(qid: Int): Bool { 
+        let val: Bool? = self.consumed_claim.get(qid);
+        return val != null && val!!; 
     }
 }
