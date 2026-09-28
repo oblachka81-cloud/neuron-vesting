@@ -1,22 +1,34 @@
-// bot/api.js — REST API: locks, whitelist, applications, admin, jetton icons (v5)
+// bot/api.js — REST API: locks, whitelist, applications, admin, jetton icons/meta (v5.1.1)
 const db = require('./db');
 const auth = require('./auth');
 const { Cell, Address, beginCell } = require('@ton/core');
 const { TonClient } = require('@ton/ton');
 
 let _tonClient = null;
+
 function getTonClient() {
   if (!_tonClient) {
+    const endpoint =
+      process.env.NETWORK === 'testnet'
+        ? 'https://testnet.toncenter.com/api/v2/jsonRPC'
+        : 'https://toncenter.com/api/v2/jsonRPC';
+
     _tonClient = new TonClient({
-      endpoint: 'https://toncenter.com/api/v2/jsonRPC',
+      endpoint,
       apiKey: process.env.TONCENTER_API_KEY,
     });
   }
   return _tonClient;
 }
 
-// ===== Jetton metadata resolver (symbol / name from TonAPI) =====
+// ===== Jetton metadata resolver (symbol / name / decimals from TonAPI) =====
 const metaCache = new Map();
+
+function safeDecimals(d) {
+  const n = Number(d ?? 9);
+  if (!Number.isFinite(n)) return 9;
+  return Math.max(0, Math.min(18, Math.floor(n)));
+}
 
 async function fetchJettonMeta(master) {
   const hit = metaCache.get(master);
@@ -29,23 +41,34 @@ async function fetchJettonMeta(master) {
 
   let symbol = null;
   let name = null;
+  let decimals = 9;
+  let image = null;
+
   try {
     const r = await fetch('https://tonapi.io/v2/jettons/' + encodeURIComponent(addr), {
       headers: process.env.TONAPI_KEY
         ? { Authorization: 'Bearer ' + process.env.TONAPI_KEY }
         : {},
     });
+
     if (r.ok) {
       const j = await r.json();
-      symbol = (j.metadata && j.metadata.symbol) || null;
-      name   = (j.metadata && j.metadata.name)   || null;
+      const md = j.metadata || {};
+
+      symbol = md.symbol || null;
+      name = md.name || null;
+      decimals = safeDecimals(md.decimals ?? j.decimals ?? null);
+      image = md.image || j.preview || null;
     }
   } catch (e) {
     console.warn('fetchJettonMeta failed', master, e.message);
   }
 
-  const rec = { t: Date.now(), symbol, name };
+  const rec = { t: Date.now(), symbol, name, decimals, image };
+
   metaCache.set(master, rec);
+  metaCache.set(addr, rec);
+
   return rec;
 }
 
@@ -54,7 +77,9 @@ async function fetchJettonMeta(master) {
 // Cross-process collision with the frontend in the same wall-clock ms is ~0 and
 // benign (one order refused, no funds lost); intra-process is the real risk.
 let _qidSeq = 0;
-function nextQid() { return BigInt(Date.now()) * 1000n + BigInt(_qidSeq++); }
+function nextQid() {
+  return BigInt(Date.now()) * 1000n + BigInt(_qidSeq++);
+}
 
 // ===== Price Cache (update every 5 mins) =====
 // NOTE: hardcoded to COGNIQ on purpose for now. Universal per-jetton pricing is
@@ -65,18 +90,22 @@ let priceCache = { price: 0.001286, updated: 0 };
 async function getCogniqPrice() {
   const now = Date.now();
   if (now - priceCache.updated < 300000) return priceCache.price;
+
   try {
     const res = await fetch('https://api.ston.fi/v1/assets');
     const data = await res.json();
-    const asset = data.asset_list.find(a =>
-      a.contract_address === 'EQDOjRZ5rbSnBBvhsv4g0JNN67p89617_2pNc_AO1dTEkaNg'
+
+    const asset = data.asset_list.find(
+      (a) => a.contract_address === 'EQDOjRZ5rbSnBBvhsv4g0JNN67p89617_2pNc_AO1dTEkaNg',
     );
+
     if (asset && asset.dex_price_usd) {
       priceCache = { price: parseFloat(asset.dex_price_usd), updated: now };
     }
   } catch (e) {
     console.warn('STON.fi price fetch failed, using cache', e);
   }
+
   return priceCache.price;
 }
 
@@ -84,19 +113,27 @@ async function getCogniqPrice() {
 const iconCache = new Map();
 
 function epFor(addr) {
-  const main = addr.startsWith('EQ') || addr.startsWith('UQ') || addr.startsWith('Ef') || addr.startsWith('Uf');
-  return main ? 'https://toncenter.com/api/v2/jsonRPC'
-              : 'https://testnet.toncenter.com/api/v2/jsonRPC';
+  const main =
+    addr.startsWith('EQ') ||
+    addr.startsWith('UQ') ||
+    addr.startsWith('Ef') ||
+    addr.startsWith('Uf');
+
+  return main
+    ? 'https://toncenter.com/api/v2/jsonRPC'
+    : 'https://testnet.toncenter.com/api/v2/jsonRPC';
 }
 
 function readSnake(cs) {
   const bytes = [];
   let cur = cs;
+
   for (;;) {
     while (cur.remainingBits >= 8) bytes.push(cur.loadUint(8));
     if (cur.remainingRefs > 0) cur = cur.loadRef().beginParse();
     else break;
   }
+
   return Buffer.from(bytes).toString('utf8').replace(/\0+$/, '');
 }
 
@@ -114,17 +151,21 @@ async function getJettonIcon(master) {
       ? { Authorization: 'Bearer ' + process.env.TONAPI_KEY }
       : {},
   });
+
   if (!r.ok) throw new Error('tonapi ' + r.status);
 
   const j = await r.json();
   let image = (j.metadata && j.metadata.image) || j.preview || null;
+
   if (image && image.startsWith('ipfs://')) {
     image = 'https://ipfs.io/ipfs/' + image.slice(7);
   }
+
   if (!image) throw new Error('no image in metadata');
 
   iconCache.set(master, { t: Date.now(), image });
   iconCache.set(addr, { t: Date.now(), image });
+
   return image;
 }
 
@@ -146,9 +187,62 @@ function json(res, code, body) {
 // Per-field length caps for untrusted public input (DoS / DB bloat guard).
 // These are NOT a substitute for column limits in db.js — exact schema bounds
 // live there; this only rejects absurdly large payloads before they reach SQL.
-const LIMITS = { applicant_name: 120, project_url: 512, notes: 2000, telegram_id: 64 };
-function overLimit(v, max) { return v != null && (typeof v !== 'string' || v.length > max); }
-function isAddr(s) { try { Address.parse(s); return true; } catch { return false; } }
+const LIMITS = {
+  applicant_name: 120,
+  project_url: 512,
+  notes: 2000,
+  telegram_id: 64,
+};
+
+function overLimit(v, max) {
+  return v != null && (typeof v !== 'string' || v.length > max);
+}
+
+function isAddr(s) {
+  try {
+    Address.parse(s);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function uniqueStrings(arr) {
+  return Array.from(new Set(arr.filter(Boolean).map(String)));
+}
+
+async function mapLimit(items, limit, fn) {
+  const result = new Array(items.length);
+  let cursor = 0;
+
+  async function worker() {
+    while (cursor < items.length) {
+      const i = cursor++;
+      result[i] = await fn(items[i], i);
+    }
+  }
+
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, () => worker()),
+  );
+
+  return result;
+}
+
+async function attachDecimalsToLocks(locks) {
+  const masters = uniqueStrings(locks.map((l) => l.jetton_master));
+  const metas = await mapLimit(masters, 5, fetchJettonMeta);
+
+  const byMaster = new Map();
+  for (let i = 0; i < masters.length; i++) {
+    byMaster.set(masters[i], metas[i]);
+  }
+
+  return locks.map((l) => ({
+    ...l,
+    decimals: safeDecimals(byMaster.get(String(l.jetton_master))?.decimals),
+  }));
+}
 
 // ===== routes =====
 async function addRoutes(req, res) {
@@ -157,15 +251,24 @@ async function addRoutes(req, res) {
 
   // ---- public ----
   if (path === '/api/stats' && req.method === 'GET') {
-    try { return json(res, 200, await db.getStats()); }
-    catch (e) { return json(res, 500, { error: e.message }); }
+    try {
+      return json(res, 200, await db.getStats());
+    } catch (e) {
+      return json(res, 500, { error: e.message });
+    }
   }
 
   if (path === '/api/locks' && req.method === 'GET') {
     const wallet = url.searchParams.get('wallet');
     if (!wallet) return json(res, 400, { error: 'wallet param required' });
-    try { return json(res, 200, { locks: await db.getLocks(wallet) }); }
-    catch (e) { return json(res, 500, { error: e.message }); }
+
+    try {
+      const locks = await db.getLocks(wallet);
+      const enriched = await attachDecimalsToLocks(locks);
+      return json(res, 200, { locks: enriched });
+    } catch (e) {
+      return json(res, 500, { error: e.message });
+    }
   }
 
   if (path === '/api/locks/public' && req.method === 'GET') {
@@ -181,17 +284,48 @@ async function addRoutes(req, res) {
   if (path === '/api/locks/by-jetton' && req.method === 'GET') {
     const master = url.searchParams.get('master');
     if (!master) return json(res, 400, { error: 'master param required' });
+
     try {
       const locks = await db.getLocksByJetton(master);
-      return json(res, 200, { locks });
+      const meta = await fetchJettonMeta(master);
+      const decimals = safeDecimals(meta.decimals);
+
+      return json(res, 200, {
+        locks: locks.map((l) => ({ ...l, decimals })),
+        decimals,
+      });
     } catch (e) {
       return json(res, 500, { error: e.message });
     }
   }
 
   if (path === '/api/whitelist' && req.method === 'GET') {
-    try { return json(res, 200, { whitelist: await db.listWhitelist() }); }
-    catch (e) { return json(res, 500, { error: e.message }); }
+    try {
+      return json(res, 200, { whitelist: await db.listWhitelist() });
+    } catch (e) {
+      return json(res, 500, { error: e.message });
+    }
+  }
+
+  const metaMatch = path.match(/^\/api\/jetton\/([^/]+)\/meta$/);
+  if (metaMatch && req.method === 'GET') {
+    try {
+      const master = decodeURIComponent(metaMatch[1]);
+      const meta = await fetchJettonMeta(master);
+
+      return json(res, 200, {
+        symbol: meta.symbol,
+        name: meta.name,
+        decimals: meta.decimals,
+      });
+    } catch (e) {
+      return json(res, 200, {
+        symbol: null,
+        name: null,
+        decimals: 9,
+        error: e.message,
+      });
+    }
   }
 
   const iconMatch = path.match(/^\/api\/jetton\/([^/]+)\/icon$/);
@@ -199,24 +333,30 @@ async function addRoutes(req, res) {
     try {
       const image = await getJettonIcon(decodeURIComponent(iconMatch[1]));
       return json(res, 200, { image });
-    } catch (e) { return json(res, 200, { image: null, error: e.message }); }
+    } catch (e) {
+      return json(res, 200, { image: null, error: e.message });
+    }
   }
 
   // ---- applicant ----
   if (path === '/api/applications' && req.method === 'POST') {
     try {
       const body = JSON.parse(await readBody(req));
+
       if (!body.jetton_master || !body.applicant) {
         return json(res, 400, { error: 'jetton_master and applicant required' });
       }
+
       // Validate addresses up front: a malformed master would otherwise sit in
       // the queue forever (approve throws on Address.parse and can't be cleared).
       if (!isAddr(body.jetton_master)) return json(res, 400, { error: 'invalid jetton_master' });
       if (!isAddr(body.applicant)) return json(res, 400, { error: 'invalid applicant' });
+
       // Reject absurdly long untrusted strings before they hit the DB.
       for (const k of Object.keys(LIMITS)) {
         if (overLimit(body[k], LIMITS[k])) return json(res, 400, { error: k + ' too long' });
       }
+
       const row = await db.insertApplication({
         jetton_master: body.jetton_master,
         applicant: body.applicant,
@@ -225,17 +365,23 @@ async function addRoutes(req, res) {
         project_url: body.project_url || null,
         notes: body.notes || null,
       });
+
       return json(res, 201, { application: row });
-    } catch (e) { return json(res, 500, { error: e.message }); }
+    } catch (e) {
+      return json(res, 500, { error: e.message });
+    }
   }
 
   if (path.startsWith('/api/applications/status/') && req.method === 'GET') {
     const id = parseInt(path.split('/').pop(), 10);
+
     try {
       const row = await db.getApplication(id);
       if (!row) return json(res, 404, { error: 'not found' });
       return json(res, 200, { application: row });
-    } catch (e) { return json(res, 500, { error: e.message }); }
+    } catch (e) {
+      return json(res, 500, { error: e.message });
+    }
   }
 
   // ---- admin: auth ----
@@ -244,7 +390,9 @@ async function addRoutes(req, res) {
       const body = JSON.parse(await readBody(req));
       const session = await auth.login(body.passphrase || '');
       return json(res, 200, session);
-    } catch (e) { return json(res, 401, { error: e.message }); }
+    } catch (e) {
+      return json(res, 401, { error: e.message });
+    }
   }
 
   if (path === '/api/admin/me' && req.method === 'GET') {
@@ -262,97 +410,138 @@ async function addRoutes(req, res) {
 
   // ---- admin: data ----
   if (path === '/api/admin/applications' && req.method === 'GET') {
-    const s = await auth.requireAdmin(req, res); if (!s) return;
+    const s = await auth.requireAdmin(req, res);
+    if (!s) return;
+
     const status = url.searchParams.get('status') || null;
-    try { return json(res, 200, { applications: await db.listApplications(status) }); }
-    catch (e) { return json(res, 500, { error: e.message }); }
+
+    try {
+      return json(res, 200, { applications: await db.listApplications(status) });
+    } catch (e) {
+      return json(res, 500, { error: e.message });
+    }
   }
 
   if (path === '/api/admin/applications/approve' && req.method === 'POST') {
-  const s = await auth.requireAdmin(req, res); if (!s) return;
-  try {
-    const body = JSON.parse(await readBody(req));
-    const app = await db.getApplication(body.id);
-    if (!app) return json(res, 404, { error: 'application not found' });
+    const s = await auth.requireAdmin(req, res);
+    if (!s) return;
 
-    // Resolve jetton metadata (symbol / name) from TonAPI if not given.
-    // Cache 1h to avoid hammering the API on repeated approvals.
-    let symbol = body.symbol || null;
-    let name   = body.name   || null;
-    if (!symbol || !name) {
-      const meta = await fetchJettonMeta(app.jetton_master);
-      symbol = symbol || meta.symbol;
-      name   = name   || meta.name;
+    try {
+      const body = JSON.parse(await readBody(req));
+      const app = await db.getApplication(body.id);
+      if (!app) return json(res, 404, { error: 'application not found' });
+
+      if (!isAddr(app.jetton_master)) {
+        return json(res, 500, { error: 'invalid jetton_master in application' });
+      }
+
+      // Resolve jetton metadata (symbol / name) from TonAPI if not given.
+      // Cache 1h to avoid hammering the API on repeated approvals.
+      let symbol = body.symbol || null;
+      let name = body.name || null;
+
+      if (!symbol || !name) {
+        const meta = await fetchJettonMeta(app.jetton_master);
+        symbol = symbol || meta.symbol;
+        name = name || meta.name;
+      }
+
+      // 1. DB approve + whitelist upsert (with resolved metadata)
+      await db.decideApplication(
+        body.id,
+        'approved',
+        body.reason || null,
+        'admin',
+        body.due_diligence || {},
+      );
+
+      await db.upsertWhitelist({
+        jetton_master: app.jetton_master,
+        name: name,
+        symbol: symbol,
+        description: body.description || null,
+        applicant: app.applicant,
+        metadata: body.metadata || {},
+      });
+
+      // 2. Prepare on-chain SetJettonWallet body for multisig.
+      // FACTORY_ADDRESS is mandatory now. Old hardcoded factory fallback removed.
+      const factoryStr = process.env.FACTORY_ADDRESS;
+      if (!factoryStr) {
+        return json(res, 500, { error: 'FACTORY_ADDRESS not configured' });
+      }
+
+      const FACTORY = Address.parse(factoryStr);
+      const master = Address.parse(app.jetton_master);
+      const client = getTonClient();
+
+      const res1 = await client.runMethod(master, 'get_wallet_address', [
+        { type: 'slice', cell: beginCell().storeAddress(FACTORY).endCell() },
+      ]);
+
+      const factoryJW = res1.stack.readCell().beginParse().loadAddress();
+
+      const qid = nextQid();
+
+      const txBody = beginCell()
+        .storeUint(0x21, 32)
+        .storeUint(qid, 64)
+        .storeAddress(master)
+        .storeAddress(factoryJW)
+        .endCell();
+
+      return json(res, 200, {
+        ok: true,
+        note: 'Sign on-chain via multisig.ton.org (2-of-3)',
+        multisig: {
+          target: FACTORY.toString(),
+          value: '0.1',
+          query_id: qid.toString(),
+          jetton_master: master.toString(),
+          factory_jetton_wallet: factoryJW.toString(),
+          body_base64: txBody.toBoc().toString('base64'),
+        },
+        // Echo resolved metadata back to the UI (useful for debug + display)
+        resolved: { symbol, name },
+      });
+    } catch (e) {
+      return json(res, 500, { error: e.message });
     }
-
-    // 1. DB approve + whitelist upsert (with resolved metadata)
-    await db.decideApplication(body.id, 'approved', body.reason || null, 'admin', body.due_diligence || {});
-    await db.upsertWhitelist({
-      jetton_master: app.jetton_master,
-      name: name,
-      symbol: symbol,
-      description: body.description || null,
-      applicant: app.applicant,
-      metadata: body.metadata || {},
-    });
-
-    // 2. Prepare on-chain SetJettonWallet body for multisig
-    const FACTORY = Address.parse(
-      process.env.FACTORY_ADDRESS
-        || 'EQC1Y_OfkDqKiBh0nBzuKvbvSqIipcbswf_x7nuglJ9LZdBp'
-    );
-    const master = Address.parse(app.jetton_master);
-    const client = getTonClient();
-
-    const res1 = await client.runMethod(master, 'get_wallet_address', [
-      { type: 'slice', cell: beginCell().storeAddress(FACTORY).endCell() },
-    ]);
-    const factoryJW = res1.stack.readCell().beginParse().loadAddress();
-
-    const qid = nextQid();
-    const txBody = beginCell()
-      .storeUint(0x21, 32)
-      .storeUint(qid, 64)
-      .storeAddress(master)
-      .storeAddress(factoryJW)
-      .endCell();
-
-    return json(res, 200, {
-      ok: true,
-      note: 'Sign on-chain via multisig.ton.org (2-of-3)',
-      multisig: {
-        target: FACTORY.toString(),
-        value: '0.1',
-        query_id: qid.toString(),
-        jetton_master: master.toString(),
-        factory_jetton_wallet: factoryJW.toString(),
-        body_base64: txBody.toBoc().toString('base64'),
-      },
-      // Echo resolved metadata back to the UI (useful for debug + display)
-      resolved: { symbol, name },
-    });
-  } catch (e) { return json(res, 500, { error: e.message }); }
-}
+  }
 
   if (path === '/api/admin/applications/reject' && req.method === 'POST') {
-    const s = await auth.requireAdmin(req, res); if (!s) return;
+    const s = await auth.requireAdmin(req, res);
+    if (!s) return;
+
     try {
       const body = JSON.parse(await readBody(req));
       await db.decideApplication(body.id, 'rejected', body.reason || null, 'admin', {});
       return json(res, 200, { ok: true });
-    } catch (e) { return json(res, 500, { error: e.message }); }
+    } catch (e) {
+      return json(res, 500, { error: e.message });
+    }
   }
 
   if (path === '/api/admin/stats' && req.method === 'GET') {
-    const s = await auth.requireAdmin(req, res); if (!s) return;
-    try { return json(res, 200, await db.getStats()); }
-    catch (e) { return json(res, 500, { error: e.message }); }
+    const s = await auth.requireAdmin(req, res);
+    if (!s) return;
+
+    try {
+      return json(res, 200, await db.getStats());
+    } catch (e) {
+      return json(res, 500, { error: e.message });
+    }
   }
 
   if (path === '/api/admin/events' && req.method === 'GET') {
-    const s = await auth.requireAdmin(req, res); if (!s) return;
-    try { return json(res, 200, { events: await db.listEvents(50) }); }
-    catch (e) { return json(res, 500, { error: e.message }); }
+    const s = await auth.requireAdmin(req, res);
+    if (!s) return;
+
+    try {
+      return json(res, 200, { events: await db.listEvents(50) });
+    } catch (e) {
+      return json(res, 500, { error: e.message });
+    }
   }
 
   return false;
