@@ -29,16 +29,21 @@ jobs:
 
       - name: Run TSA on contracts
         run: |
-          TSA_JAR="/home/runner/.tsa/tsa-cli-v0.5.3.jar"
-          TSA_JAVA="/home/runner/.tsa/jre/jdk-17.0.20.1+1-jre/bin/java"
+          TSA_JAR=$(find /home/runner/.tsa -name "tsa-cli-*.jar" | head -n 1)
+          TSA_JAVA=$(find /home/runner/.tsa -path "*/bin/java" | head -n 1)
+
+          echo "Using JAR: $TSA_JAR"
+          echo "Using Java: $TSA_JAVA"
+          
+          echo "=== TSA Analysis started ===" > tsa-report.txt
+
           for f in build/*.code.boc; do
-            echo "=== Analyzing $f ==="
-            "$TSA_JAVA" -jar "$TSA_JAR" boc --input "$f" 2>&1 | tee -a tsa-report.txt || true
-            echo "" | tee -a tsa-report.txt
+            echo "=== Analyzing $f ===" | tee -a tsa-report.txt
+            "$TSA_JAVA" -Xmx6g -jar "$TSA_JAR" boc --input "$f" >> tsa-report.txt 2>&1 || echo "[ERROR] Failed or OutOfMemory on $f" | tee -a tsa-report.txt
+            echo "" >> tsa-report.txt
           done
-          echo ""
-          echo "=== Full report ==="
-          cat tsa-report.txt
+
+          echo "=== Analysis finished ===" | tee -a tsa-report.txt
 
       - name: Upload report
         uses: actions/upload-artifact@v4
