@@ -26,20 +26,12 @@ jobs:
         run: |
           npm install tsa-installer
           npx tsa-installer install
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
-          echo "$HOME/.tsa/bin" >> $GITHUB_PATH
-          echo "$PWD/tsa-installer/bin" >> $GITHUB_PATH
-
-      - name: Locate TSA binary
-        run: |
-          echo "=== Searching for tsa binary ==="
-          find $HOME -name "tsa" -type f 2>/dev/null || true
-          find $HOME -name "tsa*" -type f 2>/dev/null || true
-          find . -name "tsa" -type f 2>/dev/null || true
 
       - name: Run TSA
         run: |
-          tsa analyze build/ > tsa-report.txt 2>&1 || true
+          TSA_JAR="/home/runner/.tsa/tsa-cli-v0.5.3.jar"
+          TSA_JAVA="/home/runner/.tsa/jre/jdk-17.0.20.1+1-jre/bin/java"
+          "$TSA_JAVA" -jar "$TSA_JAR" analyze build/ > tsa-report.txt 2>&1 || true
           cat tsa-report.txt
 
       - name: Upload report
