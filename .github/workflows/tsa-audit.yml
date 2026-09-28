@@ -26,6 +26,16 @@ jobs:
         run: |
           npm install tsa-installer
           npx tsa-installer install
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+          echo "$HOME/.tsa/bin" >> $GITHUB_PATH
+          echo "$PWD/tsa-installer/bin" >> $GITHUB_PATH
+
+      - name: Locate TSA binary
+        run: |
+          echo "=== Searching for tsa binary ==="
+          find $HOME -name "tsa" -type f 2>/dev/null || true
+          find $HOME -name "tsa*" -type f 2>/dev/null || true
+          find . -name "tsa" -type f 2>/dev/null || true
 
       - name: Run TSA
         run: |
