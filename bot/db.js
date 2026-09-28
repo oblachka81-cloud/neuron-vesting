@@ -1,17 +1,27 @@
-// bot/db.js — PostgreSQL wrapper + schema + queries (v4: + applications, whitelist, sessions, ton_fees)
+// bot/db.js — PostgreSQL wrapper + schema + queries (v5.1.1)
 const postgres = require('postgres');
 const { Address } = require('@ton/core');
 
 const DATABASE_URL = process.env.DATABASE_URL;
-if (!DATABASE_URL) { console.error('DATABASE_URL is not set'); process.exit(1); }
+if (!DATABASE_URL) {
+  console.error('DATABASE_URL is not set');
+  process.exit(1);
+}
 
-const sql = postgres(DATABASE_URL, { ssl: 'prefer', max: 5, idle_timeout: 20, connect_timeout: 10 });
+const sql = postgres(DATABASE_URL, {
+  ssl: 'prefer',
+  max: 5,
+  idle_timeout: 20,
+  connect_timeout: 10,
+});
 
 // ── Address normalization ─────────────────────────────────────────────────
-// Приводим любой адрес к raw-формату (0:hex) для единообразного сравнения.
 function normAddr(a) {
-  try { return Address.parse(a).toRawString(); }
-  catch { return String(a || '').toLowerCase(); }
+  try {
+    return Address.parse(a).toRawString();
+  } catch {
+    return String(a || '').toLowerCase();
+  }
 }
 
 async function migrate() {
@@ -30,9 +40,10 @@ async function migrate() {
       funded BOOLEAN NOT NULL DEFAULT FALSE,
       created_at TIMESTAMPTZ DEFAULT NOW()
     )`;
-  
+
   await sql`ALTER TABLE locks ADD COLUMN IF NOT EXISTS fee_jetton NUMERIC NOT NULL DEFAULT 0`;
   await sql`ALTER TABLE locks ADD COLUMN IF NOT EXISTS funded BOOLEAN NOT NULL DEFAULT FALSE`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_locks_open ON locks (lock_id) WHERE claimed_amount < amount`;
 
   await sql`
     CREATE TABLE IF NOT EXISTS lock_events (
@@ -43,6 +54,7 @@ async function migrate() {
       tx_hash TEXT NOT NULL UNIQUE,
       created_at TIMESTAMPTZ DEFAULT NOW()
     )`;
+
   await sql`
     CREATE TABLE IF NOT EXISTS indexer_cursor (
       id INT PRIMARY KEY DEFAULT 1,
@@ -50,6 +62,7 @@ async function migrate() {
       last_hash TEXT,
       updated_at TIMESTAMPTZ DEFAULT NOW()
     )`;
+
   await sql`INSERT INTO indexer_cursor (id, last_lt, last_hash) VALUES (1, 0, NULL) ON CONFLICT (id) DO NOTHING`;
   await sql`UPDATE indexer_cursor SET last_lt = 0, last_hash = NULL WHERE id = 1 AND (last_hash IS NULL OR LENGTH(last_hash) <> 64)`;
 
@@ -95,17 +108,21 @@ async function migrate() {
       ton_fees_withdrawn NUMERIC NOT NULL DEFAULT 0,
       updated_at TIMESTAMPTZ DEFAULT NOW()
     )`;
+
   await sql`INSERT INTO factory_state (id, ton_fees_accumulated, ton_fees_withdrawn)
             VALUES (1, 0, 0) ON CONFLICT (id) DO NOTHING`;
 
-  console.log('Database migrated (v4.1)');
+  console.log('Database migrated (v5.1.1)');
 }
 
 const big = (v) => BigInt(v ?? 0);
 
 async function getCursor() {
   const rows = await sql`SELECT last_lt, last_hash FROM indexer_cursor WHERE id = 1`;
-  return { lt: big(rows[0] && rows[0].last_lt), hash: rows[0] && rows[0].last_hash };
+  return {
+    lt: big(rows[0] && rows[0].last_lt),
+    hash: rows[0] && rows[0].last_hash,
+  };
 }
 
 async function setCursor(lt, hash) {
@@ -113,52 +130,70 @@ async function setCursor(lt, hash) {
 }
 
 async function insertLock(l) {
-  const amount = big(l.amount);
-  const fee = (amount * 50n) / 10000n;
+  const feeJetton = String(l.fee_jetton ?? '0');
+  const tonFee = BigInt(l.ton_fee ?? 0);
+
   const inserted = await sql`
-    INSERT INTO locks (lock_id, creator, beneficiary, jetton_master, amount, unlock_at, lockup_wallet, factory, fee_jetton)
+    INSERT INTO locks (
+      lock_id,
+      creator,
+      beneficiary,
+      jetton_master,
+      amount,
+      unlock_at,
+      lockup_wallet,
+      factory,
+      fee_jetton
+    )
     VALUES (
       ${String(l.lock_id)},
       ${normAddr(l.creator)},
       ${normAddr(l.beneficiary)},
       ${normAddr(l.jetton_master)},
-      ${String(l.amount)}, ${String(l.unlock_at)},
+      ${String(l.amount)},
+      ${String(l.unlock_at)},
       ${normAddr(l.lockup_wallet)},
       ${normAddr(l.factory)},
-      ${fee.toString()}
-    ) ON CONFLICT (lock_id) DO NOTHING
+      ${feeJetton}
+    )
+    ON CONFLICT (lock_id) DO NOTHING
     RETURNING lock_id`;
 
-  // Прибавляем TON-fee только когда лок реально вставлен (не дубликат)
-  if (inserted.length > 0) {
-    await sql`UPDATE factory_state
-              SET ton_fees_accumulated = ton_fees_accumulated + 1000000000, updated_at = NOW()
-              WHERE id = 1`;
+  if (inserted.length > 0 && tonFee > 0n) {
+    await sql`
+      UPDATE factory_state
+      SET ton_fees_accumulated = ton_fees_accumulated + ${tonFee.toString()},
+          updated_at = NOW()
+      WHERE id = 1`;
   }
 }
 
 async function markClaimed(lockId, amount) {
-  await sql`UPDATE locks SET claimed_amount = ${String(amount)} WHERE lock_id = ${String(lockId)}`;
+  await sql`
+    UPDATE locks
+    SET claimed_amount = claimed_amount + ${String(amount)}
+    WHERE lock_id = ${String(lockId)}`;
 }
 
 async function markExtended(lockId, newUnlockAt) {
   await sql`UPDATE locks SET unlock_at = ${String(newUnlockAt)} WHERE lock_id = ${String(lockId)}`;
 }
 
-// ── markFunded — фиксирует, что LockFunded (0x124) пришёл и замок получил жетоны
 async function markFunded(lockId) {
   await sql`UPDATE locks SET funded = TRUE WHERE lock_id = ${String(lockId)}`;
   console.log('LockFunded #' + lockId + ' → funded=TRUE');
 }
 
 async function insertEvent(e) {
-  await sql`
+  const rows = await sql`
     INSERT INTO lock_events (lock_id, event_type, event_data, tx_hash)
     VALUES (${String(e.lock_id)}, ${e.event_type}, ${sql.json(e.event_data)}, ${e.tx_hash})
-    ON CONFLICT (tx_hash) DO NOTHING`;
+    ON CONFLICT (tx_hash) DO NOTHING
+    RETURNING id`;
+
+  return rows.length > 0;
 }
 
-// ── getLocks — ищем по raw-адресу (единый формат после normAddr в insertLock)
 async function getLocks(wallet) {
   const w = normAddr(wallet);
   return await sql`
@@ -173,19 +208,27 @@ async function getLocks(wallet) {
 }
 
 async function getOpenLocks() {
-  return await sql`SELECT * FROM locks WHERE claimed_amount < amount ORDER BY lock_id LIMIT 20`;
+  return await sql`
+    SELECT lock_id, lockup_wallet
+    FROM locks
+    WHERE claimed_amount < amount
+    ORDER BY lock_id`;
 }
 
 async function getStats() {
   const now = Math.floor(Date.now() / 1000);
+
   const t = await sql`SELECT COUNT(*)::int AS c FROM locks`;
   const a = await sql`SELECT COUNT(*)::int AS c FROM locks WHERE claimed_amount < amount AND unlock_at > ${now}`;
   const r = await sql`SELECT COUNT(*)::int AS c FROM locks WHERE claimed_amount < amount AND unlock_at <= ${now}`;
   const v = await sql`SELECT COALESCE(SUM(amount - claimed_amount), 0) AS s FROM locks WHERE claimed_amount < amount`;
   const f = await sql`SELECT COALESCE(SUM(fee_jetton), 0) AS s FROM locks`;
   const fs = await sql`SELECT ton_fees_accumulated, ton_fees_withdrawn FROM factory_state WHERE id = 1`;
+
   return {
-    total_locks: t[0].c, locked: a[0].c, ready_to_claim: r[0].c,
+    total_locks: t[0].c,
+    locked: a[0].c,
+    ready_to_claim: r[0].c,
     tvl_nano: v[0].s.toString(),
     jetton_fees_nano: f[0].s.toString(),
     ton_fees_accumulated: (fs[0] && fs[0].ton_fees_accumulated).toString(),
@@ -193,114 +236,174 @@ async function getStats() {
   };
 }
 
-// ---- v4: whitelist ----
+// ---- whitelist ----
 async function listWhitelist() {
   return await sql`SELECT * FROM whitelist ORDER BY approved_at DESC`;
 }
+
 async function upsertWhitelist(row) {
   await sql`
     INSERT INTO whitelist (jetton_master, name, symbol, description, applicant, metadata)
-    VALUES (${normAddr(row.jetton_master)}, ${row.name || null}, ${row.symbol || null},
-            ${row.description || null}, ${row.applicant || null}, ${sql.json(row.metadata || {})})
+    VALUES (
+      ${normAddr(row.jetton_master)},
+      ${row.name || null},
+      ${row.symbol || null},
+      ${row.description || null},
+      ${row.applicant || null},
+      ${sql.json(row.metadata || {})}
+    )
     ON CONFLICT (jetton_master) DO UPDATE SET
-      name = EXCLUDED.name, symbol = EXCLUDED.symbol, description = EXCLUDED.description,
-      applicant = EXCLUDED.applicant, metadata = EXCLUDED.metadata, approved_at = NOW()`;
+      name = EXCLUDED.name,
+      symbol = EXCLUDED.symbol,
+      description = EXCLUDED.description,
+      applicant = EXCLUDED.applicant,
+      metadata = EXCLUDED.metadata,
+      approved_at = NOW()`;
 }
+
 async function removeWhitelist(jettonMaster) {
   await sql`DELETE FROM whitelist WHERE jetton_master = ${normAddr(jettonMaster)}`;
 }
 
-// ---- v4: applications ----
+// ---- applications ----
 async function listApplications(status) {
   if (status) {
     return await sql`SELECT * FROM applications WHERE status = ${status} ORDER BY created_at DESC`;
   }
+
   return await sql`SELECT * FROM applications ORDER BY CASE status
       WHEN 'pending' THEN 0 WHEN 'approved' THEN 2 ELSE 1 END, created_at DESC`;
 }
+
 async function getApplication(id) {
   const rows = await sql`SELECT * FROM applications WHERE id = ${id}`;
   return rows[0] || null;
 }
+
 async function getApplicationByMaster(jettonMaster) {
   const rows = await sql`SELECT * FROM applications WHERE jetton_master = ${normAddr(jettonMaster)}`;
   return rows[0] || null;
 }
+
 async function insertApplication(a) {
   const rows = await sql`
     INSERT INTO applications (jetton_master, applicant, telegram_id, applicant_name, project_url, notes)
-    VALUES (${normAddr(a.jetton_master)}, ${a.applicant}, ${a.telegram_id || null},
-            ${a.applicant_name || null}, ${a.project_url || null}, ${a.notes || null})
+    VALUES (
+      ${normAddr(a.jetton_master)},
+      ${a.applicant},
+      ${a.telegram_id || null},
+      ${a.applicant_name || null},
+      ${a.project_url || null},
+      ${a.notes || null}
+    )
     ON CONFLICT (jetton_master) DO UPDATE SET
-      applicant = EXCLUDED.applicant, telegram_id = EXCLUDED.telegram_id,
-      applicant_name = EXCLUDED.applicant_name, project_url = EXCLUDED.project_url,
-      notes = EXCLUDED.notes, status = 'pending', decision_reason = NULL, decided_at = NULL
+      applicant = EXCLUDED.applicant,
+      telegram_id = EXCLUDED.telegram_id,
+      applicant_name = EXCLUDED.applicant_name,
+      project_url = EXCLUDED.project_url,
+      notes = EXCLUDED.notes,
+      status = 'pending',
+      decision_reason = NULL,
+      decided_at = NULL
     RETURNING *`;
+
   return rows[0];
 }
+
 async function decideApplication(id, status, reason, decidedBy, dueDiligence) {
   await sql`
     UPDATE applications SET
-      status = ${status}, decision_reason = ${reason || null},
-      decided_by = ${decidedBy || null}, decided_at = NOW(),
+      status = ${status},
+      decision_reason = ${reason || null},
+      decided_by = ${decidedBy || null},
+      decided_at = NOW(),
       due_diligence = ${sql.json(dueDiligence || {})}
     WHERE id = ${id}`;
 }
 
-// ---- v4: admin sessions ----
+// ---- admin sessions ----
 async function createSession(token, expiresAt) {
   await sql`INSERT INTO admin_sessions (token, expires_at) VALUES (${token}, ${expiresAt})`;
 }
+
 async function getSession(token) {
   const rows = await sql`SELECT * FROM admin_sessions WHERE token = ${token} AND expires_at > NOW()`;
   return rows[0] || null;
 }
+
 async function deleteSession(token) {
   await sql`DELETE FROM admin_sessions WHERE token = ${token}`;
 }
+
 async function purgeExpiredSessions() {
   await sql`DELETE FROM admin_sessions WHERE expires_at <= NOW()`;
 }
+
 async function listEvents(limit) {
   return await sql`SELECT * FROM lock_events ORDER BY id DESC LIMIT ${limit}`;
 }
 
-async function close() { await sql.end(); }
-// ==== v5: Public Vaults Summary ====
+async function close() {
+  await sql.end();
+}
+
+// ==== Public Vaults Summary ====
 async function getPublicVaultsSummary() {
   const total = await sql`
     SELECT COUNT(*)::int AS total_locks,
            COALESCE(SUM(amount - claimed_amount), 0)::bigint AS total_tvl_nano
-    FROM locks 
+    FROM locks
     WHERE funded = true AND claimed_amount < amount
   `;
-  
+
   const byJetton = await sql`
-    SELECT jetton_master, 
+    SELECT jetton_master,
            COUNT(*)::int AS locks,
            COALESCE(SUM(amount - claimed_amount), 0)::bigint AS tvl_nano
-    FROM locks 
+    FROM locks
     WHERE funded = true AND claimed_amount < amount
-    GROUP BY jetton_master 
+    GROUP BY jetton_master
     ORDER BY tvl_nano DESC
   `;
-  
+
   return { total: total[0], by_jetton: byJetton };
 }
 
 async function getLocksByJetton(jettonMaster) {
   return await sql`
     SELECT lock_id, amount, claimed_amount, unlock_at, lockup_wallet, creator, beneficiary, funded
-    FROM locks 
+    FROM locks
     WHERE jetton_master = ${normAddr(jettonMaster)}
-    AND funded = true
+      AND funded = true
     ORDER BY lock_id DESC`;
 }
 
 module.exports = {
-  migrate, getCursor, setCursor, insertLock, markClaimed, markExtended, markFunded, insertEvent,
-  getLocks, getOpenLocks, getStats, close,
-  listWhitelist, upsertWhitelist, removeWhitelist,
-  listApplications, getApplication, getApplicationByMaster, insertApplication, decideApplication,
-  createSession, getSession, deleteSession, purgeExpiredSessions, listEvents, getPublicVaultsSummary, getLocksByJetton,
+  migrate,
+  getCursor,
+  setCursor,
+  insertLock,
+  markClaimed,
+  markExtended,
+  markFunded,
+  insertEvent,
+  getLocks,
+  getOpenLocks,
+  getStats,
+  close,
+  listWhitelist,
+  upsertWhitelist,
+  removeWhitelist,
+  listApplications,
+  getApplication,
+  getApplicationByMaster,
+  insertApplication,
+  decideApplication,
+  createSession,
+  getSession,
+  deleteSession,
+  purgeExpiredSessions,
+  listEvents,
+  getPublicVaultsSummary,
+  getLocksByJetton,
 };
