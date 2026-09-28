@@ -22,23 +22,19 @@ jobs:
       - name: Build contracts
         run: npm run build
 
-      - name: List build artifacts
-        run: |
-          echo "=== build/ contents ==="
-          ls -la build/
-
       - name: Install TSA
         run: |
           npm install tsa-installer
           npx tsa-installer install
 
-      - name: Run TSA on factory BoC
+      - name: Run TSA on contracts
         run: |
           TSA_JAR="/home/runner/.tsa/tsa-cli-v0.5.3.jar"
           TSA_JAVA="/home/runner/.tsa/jre/jdk-17.0.20.1+1-jre/bin/java"
-          for f in build/*.boc; do
+          for f in build/*.code.boc; do
             echo "=== Analyzing $f ==="
-            "$TSA_JAVA" -jar "$TSA_JAR" boc "$f" 2>&1 | tee -a tsa-report.txt || true
+            "$TSA_JAVA" -jar "$TSA_JAR" boc --input "$f" 2>&1 | tee -a tsa-report.txt || true
+            echo "" | tee -a tsa-report.txt
           done
           echo ""
           echo "=== Full report ==="
