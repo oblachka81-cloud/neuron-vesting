@@ -1493,9 +1493,50 @@ describe('NEURON Vesting — v5.1.0 (isolated + TEP-89)', () => {
             }
 
             // Either way (throw or success:false), pending must remain intact
-            expect(await wallet.getIsPendingClaim()).toEqual(true);
+                        expect(await wallet.getIsPendingClaim()).toEqual(true);
             expect(await wallet.getIsClaimConsumed(qid)).toEqual(true);
             expect(await wallet.getClaimedAmount()).toEqual(0n);
+        });
+
+        it('70. JettonExcesses emits ClaimSettled event (v5.1.1 observability)', async () => {
+            const unlockAt = BigInt(blockchain.now! + 100);
+            const wallet = blockchain.openContract(
+                await LockupWallet.fromInit(
+                    901n, factory.address, jettonMaster.address,
+                    beneficiary.address, user.address, LOCK_AMOUNT, unlockAt,
+                ),
+            );
+            await wallet.send(treasury.getSender(), { value: toNano('2') }, null);
+            await wallet.send(jettonMaster.getSender(), { value: toNano('0.1') },
+                makeTakeWalletAddress(0n, fakeJettonWallet.address, wallet.address));
+            await wallet.send(fakeJettonWallet.getSender(), { value: toNano('0.1') }, {
+                $$type: 'JettonNotification',
+                query_id: 1n, amount: LOCK_AMOUNT, sender: user.address,
+                forward_payload: beginCell().endCell().asSlice(),
+            });
+            blockchain.now = Number(unlockAt) + 10;
+
+            const qid = 902n;
+            await wallet.send(beneficiary.getSender(), { value: toNano('0.5') }, {
+                $$type: 'Claim', query_id: qid, amount: 0n,
+            });
+            const benJW = await blockchain.treasury('benJW70');
+            await wallet.send(jettonMaster.getSender(), { value: toNano('0.1') },
+                makeTakeWalletAddress(qid, benJW.address, beneficiary.address));
+
+            const resExcess = await wallet.send(fakeJettonWallet.getSender(), { value: toNano('0.05') },
+                makeExcesses(qid));
+
+            // Verify ClaimSettled (0x128) was emitted as external-out
+            const settledOp = 0x128;
+            const hasSettled = resExcess.transactions.some(tx =>
+                Array.from(tx.outMessages.values()).some(msg => {
+                    if (msg.info.type !== 'external-out' || !msg.body) return false;
+                    try { return msg.body.beginParse().loadUint(32) === settledOp; }
+                    catch { return false; }
+                })
+            );
+            expect(hasSettled).toBe(true);
         });
     });
 });
