@@ -330,8 +330,7 @@ contract LockupFactory {
             return;
         }
 
-        // Misti: skipUint(32) instead of loadUint(32) since the value is unused.
-        sc.skipUint(32);                              // op
+        sc.loadUint(32);                              // op (value unused)
         let qid: Int = sc.loadUint(64);               // client-side query id
         let jm_in: Address = sc.loadAddress();        // jetton master
         let ben: Address = sc.loadAddress();          // beneficiary
