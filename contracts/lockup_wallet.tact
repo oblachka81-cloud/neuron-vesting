@@ -1,9 +1,14 @@
 // ═══════════════════════════════════════════════════════════════════════════
-// NEURON Vesting — LockupWallet v5.0.1
+// NEURON Vesting — LockupWallet v5.0.2
 // ───────────────────────────────────────────────────────────────────────────
 // One LockupWallet per lock. Holds jettons after the factory forwards them
 // into the wallet's deterministic jetton wallet, enforces the unlock
 // schedule, and releases jettons to the beneficiary on claim.
+//
+// Changelog v5.0.2:
+//   - Static-analysis cleanup (Misti --all-detectors): replaced raw integer
+//     mode flags with symbolic constants, replaced `send(SendParameters{})`
+//     with `message()` where applicable. No functional change.
 //
 // Changelog v5.0.1:
 //   - FIXED (mainnet K1, exit 36235): JettonExcesses now accepts the success
@@ -19,7 +24,7 @@
 //
 // Changelog v5.0.0:
 //   - ADDED: Automatic sweep of all remaining TON balance to beneficiary after
-//     successful claim completion (mode: 128 + 32 + 2).
+//     successful claim completion (mode: SendRemainingBalance | DestroyIfZero | SendIgnoreErrors).
 //   - ADDED: Contract self-destruct after final claim to reclaim storage deposit.
 //
 // Jetton wallet discovery:
@@ -180,7 +185,7 @@ contract LockupWallet {
     /// Factory-only entry point: kick off TEP-89 discovery.
     receive(msg: StartDiscovery) {
         require(sender() == self.factory, "not factory");
-        send(SendParameters{
+        message(MessageParameters{
             to: self.jetton_master,
             value: WALLET_DISCOVERY_GAS,
             mode: SendPayGasSeparately,
@@ -218,7 +223,7 @@ contract LockupWallet {
 
             self.claimed = self.claimed + self.pending_amount;
 
-            send(SendParameters{
+            message(MessageParameters{
                 to: self.jetton_wallet!!,
                 value: CLAIM_GAS,
                 mode: SendPayGasSeparately,
@@ -308,7 +313,7 @@ contract LockupWallet {
         self.pending_amount = want;
         self.pending_query_id = msg.query_id;
 
-        send(SendParameters{
+        message(MessageParameters{
             to: self.jetton_master,
             value: WALLET_DISCOVERY_GAS,
             mode: SendPayGasSeparately,
@@ -339,12 +344,12 @@ contract LockupWallet {
     /// AUDIT v5.0.0:
     /// After successful claim completion (when claimed == total_amount),
     /// this handler returns ALL remaining TON balance to the beneficiary
-    /// and self-destructs the contract (mode: 128 + 32 + 2).
+    /// and self-destructs the contract.
     ///
     /// Mode breakdown:
-    ///   - 128: Send all remaining balance (not just value field)
-    ///   - 32: Ignore errors (if beneficiary address is invalid, just skip)
-    ///   - 2: Destroy this contract after sending (reclaim storage deposit)
+    ///   - SendRemainingBalance: send all remaining balance (not just value field)
+    ///   - SendIgnoreErrors: ignore errors (if beneficiary address is invalid, just skip)
+    ///   - DestroyIfZero: destroy this contract after sending (reclaim storage deposit)
     receive(msg: JettonExcesses) {
         let jw: Address? = self.jetton_wallet;
         let bw: Address? = self.beneficiary_wallet;
@@ -362,10 +367,10 @@ contract LockupWallet {
             // AUDIT v5: If this was the final claim (all funds claimed),
             // sweep all remaining TON to beneficiary and self-destruct.
             if (self.claimed >= self.total_amount) {
-                send(SendParameters{
+                message(MessageParameters{
                     to: self.beneficiary,
-                    value: 0,  // value=0 with mode:128 sends ALL balance
-                    mode: 128 + 32 + 2,
+                    value: 0,  // value=0 with SendRemainingBalance sends ALL balance
+                    mode: SendRemainingBalance | SendIgnoreErrors | DestroyIfZero,
                     body: emptyCell()
                 });
             }
