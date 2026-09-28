@@ -370,7 +370,9 @@ contract LockupWallet {
                 message(MessageParameters{
                     to: self.beneficiary,
                     value: 0,  // value=0 with SendRemainingBalance sends ALL balance
-                    mode: SendRemainingBalance | SendIgnoreErrors | DestroyIfZero,
+                    // Tact 1.6.13 does not expose a named constant for DestroyIfZero (TVM flag 32).
+                   // SendRemainingBalance (128) and SendIgnoreErrors (2) have named constants.
+                    mode: SendRemainingBalance | SendIgnoreErrors | 32,
                     body: emptyCell()
                 });
             }
