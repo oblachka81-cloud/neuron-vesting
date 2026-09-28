@@ -1,0 +1,38 @@
+name: MuTON Mutation Testing
+
+on:
+  workflow_dispatch:
+
+jobs:
+  muton:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install deps
+        run: npm ci --no-audit --no-fund
+
+      - name: Install MuTON
+        run: npm install -g @trailofbits/muton
+
+      - name: Init MuTON workspace
+        run: muton init
+
+      - name: Run mutation campaign
+        run: |
+          muton run "contracts/**/*.tact" --test.cmd "npx jest" > muton-report.txt 2>&1 || true
+          cat muton-report.txt
+
+      - name: Show results
+        run: |
+          muton results --all | tee -a muton-report.txt || true
+
+      - name: Upload report
+        uses: actions/upload-artifact@v4
+        with:
+          name: muton-report
+          path: muton-report.txt
