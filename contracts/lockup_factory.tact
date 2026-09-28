@@ -1,14 +1,20 @@
 // ═══════════════════════════════════════════════════════════════════════════
-// NEURON Vesting — LockupFactory v5.0.0
+// NEURON Vesting — LockupFactory v5.0.2
 // ───────────────────────────────────────────────────────────────────────────
 // Singleton factory. Accepts jetton transfers with a `CreateLock` payload,
 // deploys one LockupWallet per lock, and forwards the locked jettons to the
 // corresponding wallet. Also accumulates and lets the treasury withdraw
 // platform fees (TON and jettons).
 //
+// Changelog v5.0.2:
+//   - Static-analysis cleanup (Misti --all-detectors): replaced raw integer
+//     mode flags with symbolic constants, replaced `send(SendParameters{})`
+//     with `message()` / `deploy()` where applicable, replaced unused
+//     `loadUint(32)` with `skipUint(32)`. No functional change.
+//
 // Changelog v5.0.0:
 //   - Optimized DEPLOY_GAS from 0.15 to 0.12 TON based on mainnet empirical data.
-//   - Fixed bounce refund: now refunds both fee_ton AND GAS_BUFFER_TON to the 
+//   - Fixed bounce refund: now refunds both fee_ton AND GAS_BUFFER_TON to the
 //     creator if deployment fails, ensuring no funds are unfairly retained.
 //
 // Trust model:
@@ -240,7 +246,7 @@ contract LockupFactory {
     }
 
     /// Ignore Jetton Transfer Excess messages (gas refunds from internal transfers).
-    /// AUDIT: Without this handler, receiving an excess causes exit code 130 
+    /// AUDIT: Without this handler, receiving an excess causes exit code 130
     /// and aborts state cleanup. This is a no-op by design.
     receive(msg: JettonExcesses) { }
 
@@ -324,7 +330,8 @@ contract LockupFactory {
             return;
         }
 
-        sc.loadUint(32);                              // op
+        // Misti: skipUint(32) instead of loadUint(32) since the value is unused.
+        sc.skipUint(32);                              // op
         let qid: Int = sc.loadUint(64);               // client-side query id
         let jm_in: Address = sc.loadAddress();        // jetton master
         let ben: Address = sc.loadAddress();          // beneficiary
@@ -341,12 +348,12 @@ contract LockupFactory {
 
         let creator: Address = msg.sender;
 
-        // AUDIT: Overpay is refunded immediately to prevent the factory from 
+        // AUDIT: Overpay is refunded immediately to prevent the factory from
         // hoarding user funds. Only fee_ton + GAS_BUFFER_TON are retained.
         let overpay: Int = context().value - self.fee_ton - GAS_BUFFER_TON;
         self.ton_fees = self.ton_fees + self.fee_ton;
         if (overpay > 0) {
-            send(SendParameters{
+            message(MessageParameters{
                 to: creator,
                 value: overpay,
                 mode: SendPayGasSeparately,
@@ -380,20 +387,18 @@ contract LockupFactory {
         self.create_fee_jetton.set(id, fee);
         self.create_fee_ton.set(id, self.fee_ton);
 
-        // Send StartDiscovery so the wallet asks the master for its own
-        // jetton wallet address (TEP-89).
-        send(SendParameters{
-            to: childAddr,
+        // Deploy child wallet and send StartDiscovery so it asks the master
+        // for its own jetton wallet address (TEP-89).
+        deploy(DeployParameters{
+            init: childInit,
             value: DEPLOY_GAS,
             mode: SendPayGasSeparately,
-            code: childInit.code,
-            data: childInit.data,
             body: StartDiscovery{ query_id: id }.toCell()
         });
 
         // Ask the jetton master for the child wallet's jetton address.
         // The response is handled in `receive(TakeWalletAddress)` below.
-        send(SendParameters{
+        message(MessageParameters{
             to: jetton_master,
             value: DISCOVERY_GAS,
             mode: SendPayGasSeparately,
@@ -447,7 +452,7 @@ contract LockupFactory {
         let jwOpt: Address? = self.own_wallets.get(jmOpt!!);
         require(jwOpt != null, "no factory wallet");
 
-        send(SendParameters{
+        message(MessageParameters{
             to: jwOpt!!,
             value: TRANSFER_GAS,
             mode: SendPayGasSeparately,
@@ -487,7 +492,7 @@ contract LockupFactory {
         self.pending_withdraw_jetton.set(msg.query_id, msg.jetton_master);
         self.cleared_withdraw.set(msg.query_id, false); // in-flight
 
-        send(SendParameters{
+        message(MessageParameters{
             to: jw!!,
             value: TRANSFER_GAS,
             mode: SendPayGasSeparately,
@@ -558,7 +563,7 @@ contract LockupFactory {
             let refund_amount: Int = charged_ton + GAS_BUFFER_TON;
             if (self.ton_fees >= charged_ton) {
                 self.ton_fees = self.ton_fees - charged_ton;
-                send(SendParameters{
+                message(MessageParameters{
                     to: creator,
                     value: refund_amount,
                     mode: SendPayGasSeparately,
@@ -619,7 +624,7 @@ contract LockupFactory {
         self.used_qids.set(msg.query_id, true);
         self.ton_fees = self.ton_fees - msg.amount;
 
-        send(SendParameters{
+        message(MessageParameters{
             to: msg.destination,
             value: msg.amount,
             mode: SendPayGasSeparately,
@@ -640,7 +645,7 @@ contract LockupFactory {
 
         self.used_qids.set(msg.query_id, true);
 
-        send(SendParameters{
+        message(MessageParameters{
             to: msg.destination,
             value: msg.amount,
             mode: SendPayGasSeparately,
@@ -660,7 +665,7 @@ contract LockupFactory {
 
         self.used_qids.set(msg.query_id, true);
 
-        send(SendParameters{
+        message(MessageParameters{
             to: jw!!,
             value: RESCUE_GAS,
             mode: SendPayGasSeparately,
