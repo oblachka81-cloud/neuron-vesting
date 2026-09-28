@@ -16,6 +16,11 @@ jobs:
         with:
           node-version: 22
 
+      - name: Install Soufflé
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y souffle
+
       - name: Install Misti
         run: npm install -g @nowarp/misti
 
