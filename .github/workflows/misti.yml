@@ -1,0 +1,31 @@
+name: Misti Static Analysis
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'contracts/**'
+
+jobs:
+  misti:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Misti
+        run: npm install -g @nowarp/misti
+
+      - name: Run Misti
+        run: |
+          misti --all-detectors --min-severity medium contracts/ > misti-report.txt 2>&1 || true
+          cat misti-report.txt
+
+      - name: Upload report
+        uses: actions/upload-artifact@v4
+        with:
+          name: misti-report
+          path: misti-report.txt
