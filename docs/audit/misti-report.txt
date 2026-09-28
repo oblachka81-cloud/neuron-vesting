@@ -1,0 +1,53 @@
+NEURON Vesting — Misti Static Analysis Report
+=============================================
+
+Run:    Misti Static Analysis #9 (GitHub Actions, workflow_dispatch)
+Date:   2026-09-28
+Tool:   @nowarp/misti (latest via npm at run time)
+Flags:  --all-detectors --min-severity medium
+Scope:  contracts/lockup_factory.tact (v5.0.2)
+        contracts/lockup_wallet.tact  (v5.0.2)
+Soufflé: installed in CI run #9 (enables DivideBeforeMultiply,
+         ReadOnlyVariables, UnboundLoop). Not installed in runs #1–#6.
+
+Command:
+  misti --all-detectors --min-severity medium contracts/ > misti-report.txt 2>&1 || true
+
+Result (run #9, all 42 detectors):
+  No errors found
+
+-----------------------------------------------------------------------------
+HISTORY
+-----------------------------------------------------------------------------
+
+Run #1 (2026-09-28, contracts v5.0.1, no Soufflé):
+  17 MEDIUM findings, 0 HIGH/CRITICAL:
+    - 3x  SuspiciousMessageMode   lockup_wallet.tact:368 (raw mode literals 128/32/2)
+    - 13x SuboptimalSend          send(SendParameters{}) instead of message()/deploy()
+    - 1x  SuboptimalCellOperation lockup_factory.tact:327 (unused loadUint(32) result)
+  Disabled detectors (no Soufflé): DivideBeforeMultiply, ReadOnlyVariables, UnboundLoop.
+
+Fixes in contracts v5.0.2 (static-analysis cleanup, no functional change):
+  - 13x SuboptimalSend      -> message(MessageParameters{}) / deploy(DeployParameters{})
+  - 3x  SuspiciousMessageMode -> SendRemainingBalance | SendIgnoreErrors | 32
+      (literal 32 kept: Tact 1.6.13 exposes no named constant for TVM flag 32;
+       documented inline in lockup_wallet.tact)
+  - 1x  SuboptimalCellOperation -> suppressed via @misti:suppress SuboptimalCellOperation
+      (detector suggests sc.skipUint(32); no such method exists in Tact 1.6.13,
+       suppression is the documented Misti mechanism for this case)
+
+Run #6 (2026-09-28, contracts v5.0.2, no Soufflé):
+  No errors found
+
+Run #9 (2026-09-28, contracts v5.0.2, Soufflé installed):
+  No errors found
+  (all 42 detectors active, including DivideBeforeMultiply,
+   ReadOnlyVariables, UnboundLoop)
+
+-----------------------------------------------------------------------------
+NOTES
+-----------------------------------------------------------------------------
+- CI workflow: .github/workflows/misti.yml (trigger: push to contracts/** + manual).
+- Report artifact of each run is uploaded as "misti-report" in the workflow run.
+- contracts v5.0.2 is a style-only revision of v5.0.1 (no functional change);
+  mainnet deployment status of v5.0.2 is tracked separately in docs/SPEC.md.
