@@ -862,7 +862,7 @@ async function showJettonDetails(master: string) {
               ? '⏰ ready'
               : '🔒 locked';
 
-        const amt = (BigInt(l.amount) / 10n ** 9n).toString();
+        const amt = formatTokens(BigInt(l.amount), Number(l.decimals ?? 9));
         const unlockDate = new Date(Number(l.unlock_at) * 1000).toLocaleString();
         const cr = String(l.creator);
 
