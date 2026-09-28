@@ -49,7 +49,7 @@ function makeExcesses(queryId: bigint) {
     };
 }
 
-// ── Suite ──────────────────────────────────────────────────────────────────
+// ── Suite ─────────────────────────────────────────────────────────────────
 
 describe('NEURON Vesting — v4 (isolated + TEP-89)', () => {
     let blockchain: Blockchain;
@@ -161,6 +161,42 @@ describe('NEURON Vesting — v4 (isolated + TEP-89)', () => {
             });
             expect(res.transactions).toHaveTransaction({ from: treasury.address, to: factory.address, success: true });
         });
+
+        // ── v5.0.3 Finding #1 coverage (CHECK2, bijection F3) ──
+        it('56. whitelist cross-master wallet reuse -> rejected (CHECK2, bijection F3)', async () => {
+            const otherMaster = await blockchain.treasury('otherMaster');
+            // fakeJettonWallet уже занят под jettonMaster (beforeEach).
+            // Попытка привязать ЕГО к другому мастеру = кросс-мастер mis-registration.
+            const res = await factory.send(treasury.getSender(), { value: toNano('0.5') }, {
+                $$type: 'SetJettonWallet',
+                query_id: 2n,
+                jetton_master: otherMaster.address,
+                jetton_wallet: fakeJettonWallet.address,
+            });
+            expect(res.transactions).toHaveTransaction({
+                from: treasury.address, to: factory.address, success: false,
+            });
+            // Состояние не рассогласовалось: старый маппинг цел, новый не появился.
+            expect(await factory.getWalletOf(jettonMaster.address)).toEqualAddress(fakeJettonWallet.address);
+            expect(await factory.getWalletOf(otherMaster.address)).toEqual(null);
+            expect(await factory.getIsWalletSet(otherMaster.address)).toEqual(false);
+        });
+
+        it('57. whitelist second independent pair -> ok (F3 holds both ways)', async () => {
+            const otherMaster = await blockchain.treasury('otherMaster');
+            const otherWallet = await blockchain.treasury('otherWallet');
+            const res = await factory.send(treasury.getSender(), { value: toNano('0.5') }, {
+                $$type: 'SetJettonWallet',
+                query_id: 2n,
+                jetton_master: otherMaster.address,
+                jetton_wallet: otherWallet.address,
+            });
+            expect(res.transactions).toHaveTransaction({
+                from: treasury.address, to: factory.address, success: true,
+            });
+            expect(await factory.getWalletOf(jettonMaster.address)).toEqualAddress(fakeJettonWallet.address);
+            expect(await factory.getWalletOf(otherMaster.address)).toEqualAddress(otherWallet.address);
+        });
     });
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -259,6 +295,84 @@ describe('NEURON Vesting — v4 (isolated + TEP-89)', () => {
             const res = await factory.send(attacker.getSender(), { value: toNano('0.1') },
                 makeTakeWalletAddress(1n | HIGH_BIT, attacker.address, childAddr!));
             expect(res.transactions).toHaveTransaction({ from: attacker.address, to: factory.address, success: false });
+        });
+
+        // ── v5.0.3 Finding #3 coverage (replay guard F8) ──
+        it('58. duplicate TakeWalletAddress -> silently dropped, no second transfer (F8)', async () => {
+            const unlockAt = BigInt(blockchain.now! + 3600);
+            await sendCreateLock(unlockAt);                 // lock id = 1
+            const childAddr = await factory.getPendingCreateOf(1n);
+            const childJw = await blockchain.treasury('childJw58');
+
+            // Первый (валидный) ответ мастера -> форвард джеттонов уходит.
+            const res1 = await factory.send(jettonMaster.getSender(), { value: toNano('0.1') },
+                makeTakeWalletAddress(1n | HIGH_BIT, childJw.address, childAddr!));
+            expect(res1.transactions).toHaveTransaction({
+                from: jettonMaster.address, to: factory.address, success: true,
+            });
+            expect(res1.transactions).toHaveTransaction({
+                from: factory.address, to: fakeJettonWallet.address, op: 0x0f8a7ea5, // JettonTransfer
+            });
+            expect(await factory.getIsForwardConsumed(1n)).toEqual(true);
+
+            // Второй идентичный ответ -> success:true (не revert), но БЕЗ второго форварда.
+            const res2 = await factory.send(jettonMaster.getSender(), { value: toNano('0.1') },
+                makeTakeWalletAddress(1n | HIGH_BIT, childJw.address, childAddr!));
+            expect(res2.transactions).toHaveTransaction({
+                from: jettonMaster.address, to: factory.address, success: true,
+            });
+            expect(res2.transactions).not.toHaveTransaction({
+                from: factory.address, to: fakeJettonWallet.address, op: 0x0f8a7ea5,
+            });
+            // pending_create не тронут (bounce не было) — guard живёт, лок цел.
+            expect(await factory.getPendingCreateOf(1n)).toEqualAddress(childAddr!);
+            expect(await factory.getIsForwardConsumed(1n)).toEqual(true);
+        });
+
+        it('59. wrong-owner TWA rejected AND does not consume forward (atomicity)', async () => {
+            const unlockAt = BigInt(blockchain.now! + 3600);
+            await sendCreateLock(unlockAt);                 // lock id = 1
+            const childAddr = await factory.getPendingCreateOf(1n);
+            const childJw = await blockchain.treasury('childJw59');
+            const wrongOwner = await blockchain.treasury('wrongOwner59');
+
+            const resBad = await factory.send(jettonMaster.getSender(), { value: toNano('0.1') },
+                makeTakeWalletAddress(1n | HIGH_BIT, childJw.address, wrongOwner.address));
+            expect(resBad.transactions).toHaveTransaction({
+                from: jettonMaster.address, to: factory.address, success: false,
+            });
+            expect(await factory.getIsForwardConsumed(1n)).toEqual(false); // guard НЕ поставлен
+
+            // После битого — валидный всё ещё проходит и форвардит.
+            const resOk = await factory.send(jettonMaster.getSender(), { value: toNano('0.1') },
+                makeTakeWalletAddress(1n | HIGH_BIT, childJw.address, childAddr!));
+            expect(resOk.transactions).toHaveTransaction({
+                from: factory.address, to: fakeJettonWallet.address, op: 0x0f8a7ea5,
+            });
+            expect(await factory.getIsForwardConsumed(1n)).toEqual(true);
+        });
+
+        it('60. forward consumed for id=1 does not block id=2 (per-id isolation)', async () => {
+            const unlockAt = BigInt(blockchain.now! + 3600);
+            await sendCreateLock(unlockAt, 1n);             // id = 1
+            await sendCreateLock(unlockAt, 2n);             // id = 2
+            const child1 = await factory.getPendingCreateOf(1n);
+            const child2 = await factory.getPendingCreateOf(2n);
+            const jw1 = await blockchain.treasury('jw1_60');
+            const jw2 = await blockchain.treasury('jw2_60');
+
+            await factory.send(jettonMaster.getSender(), { value: toNano('0.1') },
+                makeTakeWalletAddress(1n | HIGH_BIT, jw1.address, child1!));
+            expect(await factory.getIsForwardConsumed(1n)).toEqual(true);
+            expect(await factory.getIsForwardConsumed(2n)).toEqual(false);
+
+            const res2 = await factory.send(jettonMaster.getSender(), { value: toNano('0.1') },
+                makeTakeWalletAddress(2n | HIGH_BIT, jw2.address, child2!));
+            expect(res2.transactions).toHaveTransaction({
+                from: factory.address, to: fakeJettonWallet.address, op: 0x0f8a7ea5,
+            });
+            expect(await factory.getIsForwardConsumed(2n)).toEqual(true);
+            expect(await factory.getIsForwardConsumed(1n)).toEqual(true); // id=1 не сбросился
         });
     });
 
