@@ -9,7 +9,7 @@ import { TonClient } from '@ton/ton';
 import { getHttpEndpoint } from '@orbs-network/ton-access';
 
 const FACTORY_ADDRESS = process.env.FACTORY_ADDRESS
-  || 'EQC1Y_OfkDqKiBh0nBzuKvbvSqIipcbswf_x7nuglJ9LZdBp';
+  || 'EQD_dSnLqcBiQyT2LRyNPIUpqAY9Qr9VoMgUCKtHN5xpSCTN';
 const TONCENTER_API_KEY = process.env.TONCENTER_API_KEY;
 
 async function main() {
