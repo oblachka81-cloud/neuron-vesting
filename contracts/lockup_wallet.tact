@@ -1,9 +1,16 @@
 // ═══════════════════════════════════════════════════════════════════════════
-// NEURON Vesting — LockupWallet v5.1.0
+// NEURON Vesting — LockupWallet v5.1.1
 // ───────────────────────────────────────────────────────────────────────────
 // One LockupWallet per lock. Holds jettons after the factory forwards them
 // into the wallet's deterministic jetton wallet, enforces the unlock
 // schedule, and releases jettons to the beneficiary on claim.
+//
+// Changelog v5.1.1:
+//   - OBSERVABILITY FIX: added ClaimSettled (0x128), emitted ONLY when a claim
+//     is confirmed by JettonExcesses. Claimed (0x125) remains dispatch-only.
+//     Indexers/UIs must use ClaimSettled as "paid", not Claimed.
+//   - ClaimSettled is emitted before clearing pending_* and before possible
+//     self-destruct, so settlement is observable even on final claim.
 //
 // Changelog v5.1.0:
 //   - SECURITY FIX (W4): `claimed` is now incremented ONLY on confirmed
@@ -42,13 +49,14 @@
 // Funding: JettonNotification from the discovered jetton wallet marks
 // `funded = true` iff amount == total_amount.
 //
-// Claim lifecycle (v5.1.0):
+// Claim lifecycle (v5.1.1):
 //   1. Beneficiary sends Claim (after unlock_at). pending_* set, pending_set_at=now.
 //   2. Wallet asks master for beneficiary's jetton wallet (TEP-89).
 //   3. Flow 2 dispatches JettonTransfer from own JW. `claimed` NOT yet moved.
+//      Emits Claimed (0x125) = DISPATCH, not payout.
 //   4. Settlement:
-//        - JettonExcesses (match) -> claimed += pending_amount; clear pending;
-//          clear guard; if claimed>=total -> sweep + self-destruct.
+//        - JettonExcesses (match) -> emit ClaimSettled (0x128); claimed += pending_amount;
+//          clear pending; clear guard; if claimed>=total -> sweep + self-destruct.
 //        - bounced (match) -> clear pending; clear guard; claimed untouched.
 //        - ResetPendingClaim (after timeout) -> clear pending; clear guard;
 //          claimed untouched. Late settlement after reset is ignored because
@@ -64,6 +72,8 @@
 //   I7. at most one JettonTransfer dispatch per pending_claim lifecycle
 //   I8. [v5.1.0] claimed reflects ONLY confirmed settlements; reset never
 //       mutates claimed; double-spend impossible (JW caps balance).
+//   I9. [v5.1.1] every confirmed settlement emits ClaimSettled before clearing
+//       pending state and before possible self-destruct.
 //
 // Known residual limitation (accepted, documented in SPEC):
 //   R1. If a dispatch succeeded but its excesses was lost forever (α), a reset
@@ -99,7 +109,7 @@ message(0x11) ResetPendingClaim {
     query_id: Int as uint64;
 }
 
-// ─── Events ────────────────────────────────────────────────────────────────
+// ─── Events ───────────────────────────────────────────────────────────────
 
 /// Emitted when the wallet receives the exact expected amount.
 message(0x124) LockFunded {
@@ -108,7 +118,7 @@ message(0x124) LockFunded {
 }
 
 /// Emitted when a claim JettonTransfer is dispatched (NOT yet confirmed).
-/// Confirmation is the subsequent Claimed-settlement via JettonExcesses.
+/// Confirmation is the subsequent ClaimSettled event via JettonExcesses.
 message(0x125) Claimed {
     lock_id: Int as uint64;
     amount: Int as coins;
@@ -128,7 +138,15 @@ message(0x127) ClaimReset {
     query_id: Int as uint64;
 }
 
-// ─── Constants ─────────────────────────────────────────────────────────────
+/// [v5.1.1] Emitted when a claim is CONFIRMED by JettonExcesses (settlement).
+/// This is the only wallet event that should drive "paid" state in indexers/UI.
+message(0x128) ClaimSettled {
+    lock_id: Int as uint64;
+    amount: Int as coins;
+    query_id: Int as uint64;
+}
+
+// ─── Constants ────────────────────────────────────────────────────────────
 
 /// Gas attached to a `provide_wallet_address` request to the jetton master.
 const WALLET_DISCOVERY_GAS: Int = ton("0.05");
@@ -369,14 +387,24 @@ contract LockupWallet {
         );
 
         if (self.pending_claim && msg.query_id == self.pending_query_id) {
-            // v5.1.0: confirm payment HERE, before clearing pending_amount.
-            self.claimed = self.claimed + self.pending_amount;
+            let settle_amount: Int = self.pending_amount;
+            let settle_qid: Int = msg.query_id;
+
+            // v5.1.0: confirm payment HERE.
+            self.claimed = self.claimed + settle_amount;
+
+            // v5.1.1: observable confirmation. Emit BEFORE clearing/destroy.
+            emit(ClaimSettled{
+                lock_id: self.lock_id,
+                amount: settle_amount,
+                query_id: settle_qid
+            }.toCell());
 
             self.pending_claim = false;
             self.pending_amount = 0;
             self.pending_query_id = 0;
             self.pending_set_at = 0;
-            self.consumed_claim.set(msg.query_id, null);
+            self.consumed_claim.set(settle_qid, null);
 
             if (self.claimed >= self.total_amount) {
                 message(MessageParameters{
