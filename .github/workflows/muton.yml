@@ -16,6 +16,12 @@ jobs:
       - name: Install deps
         run: npm ci --no-audit --no-fund
 
+      - name: Build contracts (baseline)
+        run: npm run build
+
+      - name: Baseline test (before mutation)
+        run: npm test
+
       - name: Install MuTON
         run: npm install -g @trailofbits/muton
 
@@ -24,7 +30,7 @@ jobs:
 
       - name: Run mutation campaign
         run: |
-          muton run "contracts/**/*.tact" --test.cmd "npx jest" > muton-report.txt 2>&1 || true
+          muton run "contracts/**/*.tact" --test.cmd "npm test" > muton-report.txt 2>&1 || true
           cat muton-report.txt
 
       - name: Show results
