@@ -1,4 +1,4 @@
-// bot/indexer.js — polls factory + lockup wallets, parses v4.2.0/v4.1.0 events
+// bot/indexer.js — polls factory + lockup wallets, parses v5.0.3 factory / v5.1.1 wallet events
 BigInt.prototype.toJSON = function () { return this.toString(); };
 
 const { Address } = require('@ton/core');
@@ -20,6 +20,7 @@ function parseEvent(body) {
     if (s.remainingBits < 32) return null;
     const op = s.loadUint(32);
 
+    // ── Factory v5.0.3 (unchanged layout) ──
     if (op === 0x100) {
       const ev = {
         type: 'LockCreated',
@@ -38,9 +39,16 @@ function parseEvent(body) {
     if (op === 0x111) return { type: 'LockCreationFailed', lock_id: Number(s.loadUintBig(64)), creator: s.loadAddress().toString(), jetton: s.loadAddress().toString(), amount: s.loadCoins().toString() };
     if (op === 0x112) return { type: 'CreateBounced', lock_id: Number(s.loadUintBig(64)), amount: s.loadCoins().toString() };
     if (op === 0x115) return { type: 'RefundRequired', creator: s.loadAddress().toString(), jetton: s.loadAddress().toString(), amount: s.loadCoins().toString() };
+
+    // ── Wallet v5.1.1 ──
     if (op === 0x124) return { type: 'LockFunded', lock_id: Number(s.loadUintBig(64)), amount: s.loadCoins().toString() };
+    // Claimed (0x125) = DISPATCH, not payout. Never markClaimed on this.
     if (op === 0x125) return { type: 'Claimed', lock_id: Number(s.loadUintBig(64)), amount: s.loadCoins().toString(), beneficiary: s.loadAddress().toString(), beneficiary_wallet: s.loadAddress().toString() };
     if (op === 0x126) return { type: 'ClaimBounced', lock_id: Number(s.loadUintBig(64)), amount: s.loadCoins().toString() };
+    // ResetPendingClaim (v5.1.0) — stuck claim cleared by beneficiary.
+    if (op === 0x127) return { type: 'ClaimReset', lock_id: Number(s.loadUintBig(64)), query_id: Number(s.loadUintBig(64)) };
+    // ClaimSettled (v5.1.1) = CONFIRMED payout. The only event that drives markClaimed.
+    if (op === 0x128) return { type: 'ClaimSettled', lock_id: Number(s.loadUintBig(64)), amount: s.loadCoins().toString(), query_id: Number(s.loadUintBig(64)) };
 
     return null;
   } catch (e) {
@@ -115,7 +123,8 @@ async function pollWallets() {
     if (!lock.lockup_wallet) continue;
     try {
       const txs = await client.getTransactions(Address.parse(lock.lockup_wallet), { limit: 10 });
-      for (const tx of txs) {
+      // reverse: oldest->newest so Claimed(dispatch) precedes ClaimSettled(confirm) in the tape
+      for (const tx of txs.slice().reverse()) {
         for (const msg of tx.outMessages.values()) {
           if (msg.info.type !== 'external-out') continue;
           const ev = parseEvent(msg.body);
@@ -124,9 +133,11 @@ async function pollWallets() {
           if (seen.has(key)) continue;
           seen.add(key);
           await db.insertEvent({ lock_id: ev.lock_id || 0, event_type: ev.type, event_data: ev, tx_hash: key });
-          if (ev.type === 'Claimed') await db.markClaimed(ev.lock_id, ev.amount);
-          if (ev.type === 'Extended') await db.markExtended(ev.lock_id, ev.new_unlock_at);
+
+          // Aggregate ONLY on confirmed state changes. Dispatch/bounce/reset stay in the tape.
           if (ev.type === 'LockFunded') await db.markFunded(ev.lock_id);
+          if (ev.type === 'ClaimSettled') await db.markClaimed(ev.lock_id, ev.amount); // v5.1.1: payout confirmed
+          if (ev.type === 'Extended') await db.markExtended(ev.lock_id, ev.new_unlock_at);
           console.log('Indexed', ev.type, '#' + (ev.lock_id || 0));
         }
       }
