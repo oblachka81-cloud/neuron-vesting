@@ -27,15 +27,12 @@ jobs:
           npm install tsa-installer
           npx tsa-installer install
 
-      - name: Run TSA
+      - name: Run TSA help
         run: |
           TSA_JAR="/home/runner/.tsa/tsa-cli-v0.5.3.jar"
           TSA_JAVA="/home/runner/.tsa/jre/jdk-17.0.20.1+1-jre/bin/java"
-          "$TSA_JAVA" -jar "$TSA_JAR" analyze build/ > tsa-report.txt 2>&1 || true
-          cat tsa-report.txt
-
-      - name: Upload report
-        uses: actions/upload-artifact@v4
-        with:
-          name: tsa-report
-          path: tsa-report.txt
+          echo "=== --help ==="
+          "$TSA_JAVA" -jar "$TSA_JAR" --help 2>&1 || true
+          echo ""
+          echo "=== --version ==="
+          "$TSA_JAVA" -jar "$TSA_JAR" --version 2>&1 || true
