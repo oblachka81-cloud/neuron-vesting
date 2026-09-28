@@ -49,6 +49,10 @@ function makeExcesses(queryId: bigint) {
     };
 }
 
+function bouncePrefix(body: Cell): Cell {
+    return beginCell().storeUint(0xFFFFFFFF, 32).storeSlice(body.beginParse()).endCell();
+}
+
 // ── Suite ─────────────────────────────────────────────────────────────────
 
 describe('NEURON Vesting — v5.1.0 (isolated + TEP-89)', () => {
@@ -1330,7 +1334,7 @@ describe('NEURON Vesting — v5.1.0 (isolated + TEP-89)', () => {
             });
         });
 
-        it('67. Reset with no pending claim -> rejected', async () => {
+                it('67. Reset with no pending claim -> rejected', async () => {
             const unlockAt = BigInt(blockchain.now! + 100);
             const wallet = blockchain.openContract(
                 await LockupWallet.fromInit(
@@ -1354,6 +1358,141 @@ describe('NEURON Vesting — v5.1.0 (isolated + TEP-89)', () => {
             expect(res.transactions).toHaveTransaction({
                 from: beneficiary.address, to: wallet.address, success: false,
             });
+        });
+    });
+
+    // ═══════════════════════════════════════════════════════════════════════
+    describe('LockupWallet: v5.1.0 bounce handling', () => {
+        it('68. bounce from own JW after dispatch -> clears pending without touching claimed', async () => {
+            const unlockAt = BigInt(blockchain.now! + 100);
+            const wallet = blockchain.openContract(
+                await LockupWallet.fromInit(
+                    801n, factory.address, jettonMaster.address,
+                    beneficiary.address, user.address, LOCK_AMOUNT, unlockAt,
+                ),
+            );
+            await wallet.send(treasury.getSender(), { value: toNano('2') }, null);
+            await wallet.send(jettonMaster.getSender(), { value: toNano('0.1') },
+                makeTakeWalletAddress(0n, fakeJettonWallet.address, wallet.address));
+            await wallet.send(fakeJettonWallet.getSender(), { value: toNano('0.1') }, {
+                $$type: 'JettonNotification',
+                query_id: 1n, amount: LOCK_AMOUNT, sender: user.address,
+                forward_payload: beginCell().endCell().asSlice(),
+            });
+            blockchain.now = Number(unlockAt) + 10;
+
+            const qid = 802n;
+            await wallet.send(beneficiary.getSender(), { value: toNano('0.5') }, {
+                $$type: 'Claim', query_id: qid, amount: 0n,
+            });
+
+            const benJW = await blockchain.treasury('benJW68');
+            await wallet.send(jettonMaster.getSender(), { value: toNano('0.1') },
+                makeTakeWalletAddress(qid, benJW.address, beneficiary.address));
+
+            // Pre-state: pending active, dispatch consumed, claimed = 0
+            expect(await wallet.getIsPendingClaim()).toEqual(true);
+            expect(await wallet.getIsClaimConsumed(qid)).toEqual(true);
+            expect(await wallet.getClaimedAmount()).toEqual(0n);
+
+            // Simulate bounce: send bounced<JettonTransfer> from own JW
+            const bouncedBody = beginCell()
+                .storeUint(0xFFFFFFFF, 32)   // bounce prefix
+                .storeUint(0x0f8a7ea5, 32)   // original opcode (JettonTransfer)
+                .storeUint(qid, 64)
+                .endCell();
+
+            await blockchain.sendMessage({
+                info: {
+                    type: 'internal',
+                    ihrDisabled: true,
+                    bounce: false,
+                    bounced: true,
+                    src: fakeJettonWallet.address,
+                    dest: wallet.address,
+                    value: { coins: toNano('0.05') },
+                    ihrFee: 0n,
+                    forwardFee: 0n,
+                    createdLt: 0n,
+                    createdAt: 0,
+                },
+                body: bouncedBody,
+            });
+
+            // Post-state: pending cleared, consumed cleared, claimed unchanged
+            expect(await wallet.getIsPendingClaim()).toEqual(false);
+            expect(await wallet.getIsClaimConsumed(qid)).toEqual(false);
+            expect(await wallet.getClaimedAmount()).toEqual(0n);
+            expect(await wallet.getAvailableClaimable()).toEqual(LOCK_AMOUNT);
+
+            // Wallet still alive (did NOT self-destruct)
+            const state = await blockchain.getContract(wallet.address);
+            expect(state.balance).toBeGreaterThan(0n);
+        });
+
+        it('69. bounce from foreign sender -> rejected (pending intact)', async () => {
+            const unlockAt = BigInt(blockchain.now! + 100);
+            const wallet = blockchain.openContract(
+                await LockupWallet.fromInit(
+                    803n, factory.address, jettonMaster.address,
+                    beneficiary.address, user.address, LOCK_AMOUNT, unlockAt,
+                ),
+            );
+            await wallet.send(treasury.getSender(), { value: toNano('2') }, null);
+            await wallet.send(jettonMaster.getSender(), { value: toNano('0.1') },
+                makeTakeWalletAddress(0n, fakeJettonWallet.address, wallet.address));
+            await wallet.send(fakeJettonWallet.getSender(), { value: toNano('0.1') }, {
+                $$type: 'JettonNotification',
+                query_id: 1n, amount: LOCK_AMOUNT, sender: user.address,
+                forward_payload: beginCell().endCell().asSlice(),
+            });
+            blockchain.now = Number(unlockAt) + 10;
+
+            const qid = 804n;
+            await wallet.send(beneficiary.getSender(), { value: toNano('0.5') }, {
+                $$type: 'Claim', query_id: qid, amount: 0n,
+            });
+            const benJW = await blockchain.treasury('benJW69');
+            await wallet.send(jettonMaster.getSender(), { value: toNano('0.1') },
+                makeTakeWalletAddress(qid, benJW.address, beneficiary.address));
+
+            expect(await wallet.getIsPendingClaim()).toEqual(true);
+
+            // Bounce from a foreign sender (not the JW, not the beneficiary)
+            const bouncedBody = beginCell()
+                .storeUint(0xFFFFFFFF, 32)
+                .storeUint(0x0f8a7ea5, 32)
+                .storeUint(qid, 64)
+                .endCell();
+
+            const foreign = await blockchain.treasury('foreign69');
+
+            let threw = false;
+            try {
+                await blockchain.sendMessage({
+                    info: {
+                        type: 'internal',
+                        ihrDisabled: true,
+                        bounce: false,
+                        bounced: true,
+                        src: foreign.address,
+                        dest: wallet.address,
+                        value: { coins: toNano('0.05') },
+                        ihrFee: 0n,
+                        forwardFee: 0n,
+                        createdLt: 0n,
+                        createdAt: 0,
+                    },
+                    body: bouncedBody,
+                });
+            } catch (e) {
+                threw = true;
+            }
+
+            // Either way (throw or success:false), pending must remain intact
+            expect(await wallet.getIsPendingClaim()).toEqual(true);
+            expect(await wallet.getIsClaimConsumed(qid)).toEqual(true);
+            expect(await wallet.getClaimedAmount()).toEqual(0n);
         });
     });
 });
