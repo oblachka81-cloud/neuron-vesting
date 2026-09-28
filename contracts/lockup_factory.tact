@@ -1,16 +1,24 @@
 // ═══════════════════════════════════════════════════════════════════════════
-// NEURON Vesting — LockupFactory v5.0.2
+// NEURON Vesting — LockupFactory v5.0.3
 // ───────────────────────────────────────────────────────────────────────────
 // Singleton factory. Accepts jetton transfers with a `CreateLock` payload,
 // deploys one LockupWallet per lock, and forwards the locked jettons to the
 // corresponding wallet. Also accumulates and lets the treasury withdraw
 // platform fees (TON and jettons).
 //
+// Changelog v5.0.3:
+//   - SECURITY FIX (Finding #1): Hardened SetJettonWallet precondition to
+//     enforce strict bijection F3 in both directions. Prevents cross-master
+//     mis-registration even under treasury compromise or manual error.
+//   - SECURITY FIX (Finding #3): Added replay guard for TakeWalletAddress
+//     create-flow responses. Prevents malicious/broken masters from triggering
+//     false CreateBounced on already-funded locks via repeated TEP-89 replies.
+//
 // Changelog v5.0.2:
 //   - Static-analysis cleanup (Misti --all-detectors): replaced raw integer
 //     mode flags with symbolic constants, replaced `send(SendParameters{})`
 //     with `message()` / `deploy()` where applicable, replaced unused
-//     `loadUint(32)` with `skipUint(32)`. No functional change.
+//     `loadUint(32)` with skip logic. No functional change.
 //
 // Changelog v5.0.0:
 //   - Optimized DEPLOY_GAS from 0.15 to 0.12 TON based on mainnet empirical data.
@@ -30,13 +38,15 @@
 // Invariants:
 //   F1.  next_id strictly increases, never reused
 //   F2.  own_wallets[m] set  <=>  treasury approved master m
-//   F3.  wallet_to_master[w] = m  <=>  own_wallets[m] = w  (bijection)
+//   F3.  wallet_to_master[w] = m  <=>  own_wallets[m] = w  (strict bijection)
 //   F4.  fees[m] = cumulative platform fee for master m, minus withdrawals
 //   F5.  pending_withdraw[qid] and pending_withdraw_jetton[qid] are set together;
 //        cleared_withdraw[qid] is set to false while in-flight, true after a
 //        bounce has been processed, so a duplicated bounce cannot double-credit
 //   F6.  used_qids is monotonic: once true, never false
 //   F7.  pending_create[id] and create_*[id] are set together, cleared on bounce
+//   F8.  consumed_forward[id] ensures at-most-one JettonTransfer per lock id
+//        (replay guard against duplicate TakeWalletAddress from master)
 //
 // Known limitations:
 //   L1. LockCreated is emitted before the jetton transfer confirms. If the
@@ -46,6 +56,9 @@
 //   L2. If a create-transfer bounce is lost, the pending_create entry for
 //       that lock_id remains set. The entry is small and can be cleaned up
 //       by a future migration.
+//   L5. Malicious or buggy masters may attempt to reply multiple times to
+//       ProvideWalletAddress. This is mitigated on-chain by the consumed_forward
+//       map (F8); duplicates are silently dropped.
 //
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -229,6 +242,12 @@ contract LockupFactory {
     create_fee_jetton: map<Int, Int>;
     create_fee_ton: map<Int, Int>;
 
+    // ── Replay guard for create-forward (F8) ───────────────────────────
+    /// Tracks which lock ids have already had their initial JettonTransfer
+    /// dispatched. Prevents duplicate dispatches from repeated TakeWalletAddress
+    /// responses (malicious/buggy master). Cleared alongside pending_create on bounce.
+    consumed_forward: map<Int, Bool>;
+
     // ── In-flight withdraw tracking (F5) ───────────────────────────────
     // NOTE: Tact does not support optional value types inside maps.
     // We use a parallel "cleared" flag instead of set(null) for cleanup.
@@ -255,14 +274,20 @@ contract LockupFactory {
     // ═══════════════════════════════════════════════════════════════════
 
     /// Register a jetton master and the factory's jetton wallet for that
-    /// master (F2, F3). Re-setting with the same wallet is allowed; setting
-    /// a different wallet for an already registered master is rejected.
+    /// master (F2, F3). Re-setting with the same pair is allowed; setting
+    /// a different wallet for an already registered master OR mapping a
+    /// wallet already assigned to another master is rejected.
     receive(msg: SetJettonWallet) {
         require(sender() == self.treasury, "not treasury");
         require(msg.query_id > 0, "qid 0");
 
-        let cur: Address? = self.own_wallets.get(msg.jetton_master);
-        require(cur == null || cur!! == msg.jetton_wallet, "already set");
+        // CHECK 1: Master not mapped to a DIFFERENT wallet
+        let curWalletForMaster: Address? = self.own_wallets.get(msg.jetton_master);
+        require(curWalletForMaster == null || curWalletForMaster!! == msg.jetton_wallet, "master already mapped");
+
+        // CHECK 2: Wallet not mapped to a DIFFERENT master (NEW GUARD - Finding #1)
+        let curMasterForWallet: Address? = self.wallet_to_master.get(msg.jetton_wallet);
+        require(curMasterForWallet == null || curMasterForWallet!! == msg.jetton_master, "wallet already in use");
 
         self.own_wallets.set(msg.jetton_master, msg.jetton_wallet);
         self.wallet_to_master.set(msg.jetton_wallet, msg.jetton_master);
@@ -434,6 +459,12 @@ contract LockupFactory {
         if ((qid & HIGH_BIT) == 0) { return; }
 
         let id: Int = qid & (HIGH_BIT - 1);
+        
+        // REPLAY GUARD (Finding #3 / F8): Drop duplicate TakeWalletAddress
+        // responses for the same lock id. Prevents false CreateBounced on
+        // funded locks caused by malicious/buggy masters replying twice.
+        if (self.consumed_forward.get(id) != null) { return; }
+
         let child: Address? = self.pending_create.get(id);
         if (child == null) { return; }
 
@@ -451,6 +482,9 @@ contract LockupFactory {
 
         let jwOpt: Address? = self.own_wallets.get(jmOpt!!);
         require(jwOpt != null, "no factory wallet");
+
+        // Mark forward as consumed BEFORE sending (atomicity within transaction).
+        self.consumed_forward.set(id, true);
 
         message(MessageParameters{
             to: jwOpt!!,
@@ -578,12 +612,14 @@ contract LockupFactory {
                 amount: amount + fee
             }.toCell());
 
+            // Clear all create-state INCLUDING the replay guard.
             self.pending_create.set(id, null);
             self.create_creator.set(id, null);
             self.create_amount.set(id, null);
             self.create_jetton.set(id, null);
             self.create_fee_jetton.set(id, null);
             self.create_fee_ton.set(id, null);
+            self.consumed_forward.set(id, null); // ← NEW CLEANUP
             return;
         }
 
@@ -699,4 +735,8 @@ contract LockupFactory {
     get fun isWalletSet(jetton: Address): Bool { return self.own_wallets.get(jetton) != null; }
     get fun walletOf(jetton: Address): Address? { return self.own_wallets.get(jetton); }
     get fun pendingCreateOf(lockId: Int): Address? { return self.pending_create.get(lockId); }
+    get fun isForwardConsumed(lockId: Int): Bool { 
+        let val: Bool? = self.consumed_forward.get(lockId);
+        return val != null && val!!; 
+    }
 }
