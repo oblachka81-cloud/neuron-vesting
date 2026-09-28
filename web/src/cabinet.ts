@@ -33,7 +33,8 @@ const RESET_TIMEOUT = 3600;
 const MESSAGE_VALUE = toNano('0.05');
 
 const localPending = new Set<string>();
-let autoRefreshScheduled = false;
+let refreshInFlight = false;
+let refreshQueued = false;
 
 export function mountCabinet(tc: TonConnectUI) {
   tcRef = tc;
@@ -45,6 +46,33 @@ export function mountCabinet(tc: TonConnectUI) {
 
   document.getElementById('btn-refresh-locks')?.addEventListener('click', refreshLocks);
   (document.getElementById('app-form') as HTMLFormElement)?.addEventListener('submit', onAppSubmit);
+
+  // Единый делегат на список — переживает любую перерисовку карточек,
+  // слушатели больше не навешиваются по кругу и не текут.
+  const list = document.getElementById('locks-list');
+  list?.addEventListener('click', (ev) => {
+    const btn = (ev.target as HTMLElement)?.closest?.(
+      '[data-claim-full],[data-claim-partial],[data-reset]',
+    ) as HTMLElement | null;
+    if (!btn) return;
+    const lockId = btn.dataset.lockId!;
+    const wallet = btn.dataset.wallet!;
+    if (btn.hasAttribute('data-claim-full')) {
+      onClaim(lockId, wallet, 'full');
+    } else if (btn.hasAttribute('data-claim-partial')) {
+      const inp = list!.querySelector<HTMLInputElement>(`[data-partial="${lockId}"]`);
+      onClaim(
+        lockId,
+        wallet,
+        'partial',
+        inp?.value || '',
+        Number(btn.dataset.decimals || 9),
+        btn.dataset.available,
+      );
+    } else if (btn.hasAttribute('data-reset')) {
+      onReset(lockId, wallet);
+    }
+  });
 
   refreshWhitelist();
   refreshLocks();
@@ -103,11 +131,7 @@ async function runGetter(address: string, method: string): Promise<bigint | null
         id: '1',
         jsonrpc: '2.0',
         method: 'runGetMethod',
-        params: {
-          address,
-          method,
-          stack: [],
-        },
+        params: { address, method, stack: [] },
       }),
     });
 
@@ -185,14 +209,23 @@ async function refreshLocks() {
   const list = document.getElementById('locks-list');
   if (!list) return;
 
-  if (!currentWallet) {
-    list.innerHTML = '<p class="hint">Connect wallet to see your locks</p>';
+  if (refreshInFlight) {
+    refreshQueued = true;
     return;
   }
-
-  list.innerHTML = '<p class="hint">Loading...</p>';
+  refreshInFlight = true;
 
   try {
+    if (!currentWallet) {
+      list.innerHTML = '<p class="hint">Connect wallet to see your locks</p>';
+      return;
+    }
+
+    // Спиннер — ТОЛЬКО когда карточек ещё нет (первый вход / смена кошелька).
+    // При повторных refresh старые карточки остаются на экране, моргания нет.
+    const hasCards = !!list.querySelector('[data-lock-id]');
+    if (!hasCards) list.innerHTML = '<p class="hint">Loading...</p>';
+
     const r = await fetch(`${API_URL}/api/locks?wallet=${encodeURIComponent(currentWallet)}`);
     const j = await r.json();
     const locks: Lock[] = j.locks || [];
@@ -202,43 +235,31 @@ async function refreshLocks() {
       return;
     }
 
-    const enriched = await mapLimit(locks, 3, enrichLock);
-
-    list.innerHTML = enriched.map(lockCard).join('');
-
-    list.querySelectorAll('[data-claim-full]').forEach((b) => {
-      b.addEventListener('click', () => {
-        const el = b as HTMLElement;
-        onClaim(el.dataset.lockId!, el.dataset.wallet!, 'full');
-      });
-    });
-
-    list.querySelectorAll('[data-claim-partial]').forEach((b) => {
-      b.addEventListener('click', () => {
-        const el = b as HTMLElement;
-        const lockId = el.dataset.lockId!;
-        const input = list.querySelector<HTMLInputElement>(`[data-partial="${lockId}"]`);
-        onClaim(
-          lockId,
-          el.dataset.wallet!,
-          'partial',
-          input?.value || '',
-          Number(el.dataset.decimals || 9),
-          el.dataset.available,
-        );
-      });
-    });
-
-    list.querySelectorAll('[data-reset]').forEach((b) => {
-      b.addEventListener('click', () => {
-        const el = b as HTMLElement;
-        onReset(el.dataset.lockId!, el.dataset.wallet!);
-      });
-    });
-
+    // Мгновенный каркас по данным БД (статус ready/locked/claimed уже валиден).
+    list.innerHTML = locks.map(lockCardShell).join('');
     startTimers();
+
+    // On-chain уточнение — фоном, патчит каждую карточку по id, список не трогает.
+    await Promise.allSettled(
+      locks.map(async (l) => {
+        try {
+          const e = await enrichLock(l);
+          patchLock(e);
+        } catch {
+          /* тонцентр тормознул/лимит — карточка остаётся по БД, не падаем */
+        }
+      }),
+    );
   } catch (e: any) {
-    list.innerHTML = `<p class="hint" style="color:#ff6b6b">Error: ${e.message}</p>`;
+    if (!hasCards) {
+      list.innerHTML = `<p class="hint" style="color:#ff6b6b">Error: ${e.message}</p>`;
+    }
+  } finally {
+    refreshInFlight = false;
+    if (refreshQueued) {
+      refreshQueued = false;
+      refreshLocks();
+    }
   }
 }
 
@@ -248,8 +269,7 @@ async function enrichLock(l: Lock): Promise<EnrichedLock> {
   const dbClaimed = BigInt(l.claimed_amount || '0');
   const decimals = safeDecimals((l as any).decimals);
 
-  const shouldReadOnchain =
-    l.status !== 'locked' || Number(l.unlock_at) <= now;
+  const shouldReadOnchain = l.status !== 'locked' || Number(l.unlock_at) <= now;
 
   let claimedOnchain: bigint | null = null;
   let availableOnchain: bigint | null = null;
@@ -315,118 +335,114 @@ async function enrichLock(l: Lock): Promise<EnrichedLock> {
   };
 }
 
-function lockCard(l: EnrichedLock) {
+// Кнопки claim/partial — общие для каркаса и полной карточки.
+function claimControls(
+  lockId: string,
+  wallet: string,
+  availText: string,
+  availNano: bigint,
+  decimals: number,
+) {
+  return `
+    ⏰ ready
+    <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      <button class="btn-claim" data-claim-full data-lock-id="${lockId}" data-wallet="${wallet}">Claim all</button>
+      <input class="partial-input" data-partial="${lockId}" type="text" inputmode="decimal" placeholder="partial amount"
+        style="min-width:150px;padding:6px 8px;border-radius:8px;border:1px solid #333;background:#111;color:#fff"/>
+      <button class="btn-claim-partial" data-claim-partial data-lock-id="${lockId}" data-wallet="${wallet}"
+        data-available="${availNano.toString()}" data-decimals="${decimals}">Claim part</button>
+    </div>
+    <div class="hint" style="margin-top:6px">available: ${availText}</div>`;
+}
+
+// Каркас по данным БД — рисуется мгновенно, без тонцентра.
+function lockCardShell(l: Lock) {
   const amount = BigInt(l.amount);
-  const amt = formatTokens(amount, l.decimals);
-  const claimed = formatTokens(l.displayClaimed, l.decimals);
-  const available = formatTokens(l.displayAvailable, l.decimals);
-
+  const claimed = BigInt(l.claimed_amount || '0');
+  const decimals = safeDecimals((l as any).decimals);
+  const amt = formatTokens(amount, decimals);
+  const cl = formatTokens(claimed, decimals);
+  const avail = amount > claimed ? formatTokens(amount - claimed, decimals) : '0';
+  const progress = amount > 0n ? Number((claimed * 100n) / amount) : 100;
   const isBen = currentWallet ? sameAddr(l.beneficiary, currentWallet) : false;
-  const isLocalPending = localPending.has(String(l.lock_id));
-
-  const progress =
-    amount > 0n
-      ? Number((l.displayClaimed * 100n) / amount)
-      : 100;
+  const ms = l.jetton_master.slice(0, 6) + '...' + l.jetton_master.slice(-4);
 
   let status: string;
-
-  if (l.displayStatus === 'claimed') {
+  if (l.status === 'claimed') {
     status = '✅ received';
-  } else if (l.displayStatus === 'in_flight') {
-    status = '⏳ claim in flight';
-
-    if (l.resettable && isBen) {
-      status += `
-        <button
-          class="btn-reset"
-          style="margin-left:8px"
-          data-reset
-          data-lock-id="${l.lock_id}"
-          data-wallet="${l.lockup_wallet}"
-        >
-          Reset
-        </button>
-      `;
-    } else if (l.pendingSetAt > 0n) {
-      const resetAt = Number(l.pendingSetAt + BigInt(RESET_TIMEOUT));
-      status += ` · reset in <span data-reset-timer="${resetAt}" class="timer"></span>`;
-    }
-  } else if (l.displayStatus === 'ready') {
-    if (isLocalPending) {
-      status = '⏳ transaction sent, waiting confirmation';
-    } else if (isBen) {
-      status = `
-        ⏰ <span data-timer="${l.unlock_at}" class="timer">ready</span>
-        <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-          <button
-            class="btn-claim"
-            data-claim-full
-            data-lock-id="${l.lock_id}"
-            data-wallet="${l.lockup_wallet}"
-          >
-            Claim all
-          </button>
-
-          <input
-            class="partial-input"
-            data-partial="${l.lock_id}"
-            type="text"
-            inputmode="decimal"
-            placeholder="partial amount"
-            style="min-width:150px;padding:6px 8px;border-radius:8px;border:1px solid #333;background:#111;color:#fff"
-          />
-
-          <button
-            class="btn-claim-partial"
-            data-claim-partial
-            data-lock-id="${l.lock_id}"
-            data-wallet="${l.lockup_wallet}"
-            data-available="${l.displayAvailable.toString()}"
-            data-decimals="${l.decimals}"
-          >
-            Claim part
-          </button>
-        </div>
-        <div class="hint" style="margin-top:6px">
-          available: ${available}
-        </div>
-      `;
-    } else {
-      status = `
-        ⏰ <span data-timer="${l.unlock_at}" class="timer">ready</span>
-        <span class="hint" style="margin-left:8px">(claim for beneficiary only)</span>
-      `;
-    }
+  } else if (l.status === 'ready') {
+    status = isBen
+      ? claimControls(l.lock_id, l.lockup_wallet, avail, amount - claimed, decimals)
+      : `⏰ ready <span class="hint">(claim for beneficiary only)</span>`;
   } else {
     status = `🔒 unlocks in <span data-timer="${l.unlock_at}" class="timer"></span>`;
   }
 
+  return `<div class="lock-card" data-lock-id="${l.lock_id}">
+    <div class="lock-head">#${l.lock_id} · <code>${ms}</code> · ${amt}</div>
+    <div class="lock-status">${status}</div>
+    <div class="hint" style="margin-top:6px">claimed: ${cl} / ${amt} · ${progress}%</div>
+    <div class="lock-foot"><a href="${EXPLORER(l.lockup_wallet)}" target="_blank" rel="noopener">lockup wallet ↗</a></div>
+  </div>`;
+}
+
+// Полная карточка по обогащённым (on-chain) данным — для патча.
+function lockCardFull(l: EnrichedLock) {
+  const amount = BigInt(l.amount);
+  const amt = formatTokens(amount, l.decimals);
+  const claimed = formatTokens(l.displayClaimed, l.decimals);
+  const available = formatTokens(l.displayAvailable, l.decimals);
+  const isBen = currentWallet ? sameAddr(l.beneficiary, currentWallet) : false;
+  const isLocalPending = localPending.has(String(l.lock_id));
+  const progress = amount > 0n ? Number((l.displayClaimed * 100n) / amount) : 100;
   const ms = l.jetton_master.slice(0, 6) + '...' + l.jetton_master.slice(-4);
 
-  return `<div class="lock-card">
-    <div class="lock-head">
-      #${l.lock_id} · <code>${ms}</code> · ${amt}
-    </div>
+  let status: string;
+  if (l.displayStatus === 'claimed') {
+    status = '✅ received';
+  } else if (l.displayStatus === 'in_flight') {
+    status = '⏳ claim in flight';
+    if (l.resettable && isBen) {
+      status += ` <button class="btn-reset" style="margin-left:8px" data-reset data-lock-id="${l.lock_id}" data-wallet="${l.lockup_wallet}">Reset</button>`;
+    } else if (l.pendingSetAt > 0n) {
+      status += ` · reset in <span data-reset-timer="${Number(l.pendingSetAt + BigInt(RESET_TIMEOUT))}" class="timer"></span>`;
+    }
+  } else if (l.displayStatus === 'ready') {
+    status = isLocalPending
+      ? '⏳ transaction sent, waiting confirmation'
+      : isBen
+        ? claimControls(l.lock_id, l.lockup_wallet, available, l.displayAvailable, l.decimals)
+        : `⏰ ready <span class="hint">(claim for beneficiary only)</span>`;
+  } else {
+    status = `🔒 unlocks in <span data-timer="${l.unlock_at}" class="timer"></span>`;
+  }
 
+  return `<div class="lock-card" data-lock-id="${l.lock_id}">
+    <div class="lock-head">#${l.lock_id} · <code>${ms}</code> · ${amt}</div>
     <div class="lock-status">${status}</div>
-
-    <div class="hint" style="margin-top:6px">
-      claimed: ${claimed} / ${amt} · ${progress}%
-    </div>
-
-    <div class="lock-foot">
-      <a href="${EXPLORER(l.lockup_wallet)}" target="_blank" rel="noopener">lockup wallet ↗</a>
-    </div>
+    <div class="hint" style="margin-top:6px">claimed: ${claimed} / ${amt} · ${progress}%</div>
+    <div class="lock-foot"><a href="${EXPLORER(l.lockup_wallet)}" target="_blank" rel="noopener">lockup wallet ↗</a></div>
   </div>`;
+}
+
+// Патч ОДНОЙ карточки по id — список и соседние карточки не трогаем.
+function patchLock(l: EnrichedLock) {
+  const list = document.getElementById('locks-list');
+  if (!list) return;
+  const node = list.querySelector(`[data-lock-id="${CSS.escape(String(l.lock_id))}"]`);
+  if (!node) return; // лок уже ушёл из DOM (сменили кошелёк) — некуда патчить
+  const tmp = document.createElement('div');
+  tmp.innerHTML = lockCardFull(l).trim();
+  node.replaceWith(tmp.firstElementChild!);
 }
 
 function startTimers() {
   if ((window as any).__nv_timer) clearInterval((window as any).__nv_timer);
 
+  let planned = false;
   const tick = () => {
     const now = Math.floor(Date.now() / 1000);
-    let needRefresh = false;
+    let crossed = false;
 
     document.querySelectorAll('[data-timer], [data-reset-timer]').forEach((el) => {
       const htmlEl = el as HTMLElement;
@@ -435,7 +451,7 @@ function startTimers() {
 
       if (diff <= 0) {
         htmlEl.textContent = 'ready';
-        needRefresh = true;
+        crossed = true;
         return;
       }
 
@@ -445,15 +461,14 @@ function startTimers() {
       const s = diff % 60;
 
       htmlEl.textContent =
-        d > 0
-          ? `${d}d ${pad(h)}:${pad(m)}:${pad(s)}`
-          : `${pad(h)}:${pad(m)}:${pad(s)}`;
+        d > 0 ? `${d}d ${pad(h)}:${pad(m)}:${pad(s)}` : `${pad(h)}:${pad(m)}:${pad(s)}`;
     });
 
-    if (needRefresh && !autoRefreshScheduled) {
-      autoRefreshScheduled = true;
+    // Один refresh на переход через unlock/reset, не шторм каждую секунду.
+    if (crossed && !planned) {
+      planned = true;
       setTimeout(() => {
-        autoRefreshScheduled = false;
+        planned = false;
         refreshLocks();
       }, 1200);
     }
@@ -512,13 +527,8 @@ async function onClaim(
         alert('Amount is larger than available');
         return;
       }
-
-      // If user entered exactly available, use full-claim semantics.
-      if (parsed === available) {
-        amount = 0n;
-      } else {
-        amount = parsed;
-      }
+      // Если ввели ровно available — используем full-claim семантику (amount=0).
+      amount = parsed === available ? 0n : parsed;
     } else {
       amount = parsed;
     }
@@ -665,9 +675,7 @@ async function onAppSubmit(e: Event) {
 
 async function jettonIcon(master: string): Promise<string | null> {
   try {
-    const r = await fetch(
-      `${API_URL}/api/jetton/${encodeURIComponent(master)}/icon`,
-    );
+    const r = await fetch(`${API_URL}/api/jetton/${encodeURIComponent(master)}/icon`);
     if (!r.ok) return null;
     const j = await r.json();
     return j.image || null;
@@ -851,6 +859,7 @@ async function showJettonDetails(master: string) {
     const j = await r.json();
     const iconSrc = await jettonIcon(master);
     const locks = j.locks || [];
+    const defDecimals = Number(j.decimals ?? 9);
 
     const locksHtml = locks
       .map((l: any) => {
@@ -862,7 +871,8 @@ async function showJettonDetails(master: string) {
               ? '⏰ ready'
               : '🔒 locked';
 
-        const amt = formatTokens(BigInt(l.amount), Number(l.decimals ?? 9));
+        const decimals = Number(l.decimals ?? defDecimals);
+        const amt = formatTokens(BigInt(l.amount), decimals);
         const unlockDate = new Date(Number(l.unlock_at) * 1000).toLocaleString();
         const cr = String(l.creator);
 
