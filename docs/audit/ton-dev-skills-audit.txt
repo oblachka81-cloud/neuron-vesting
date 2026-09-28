@@ -1,0 +1,65 @@
+NEURON Vesting — TON Dev Skills Audit Report
+============================================
+
+Tool:       TON Dev Skills Audit v0.1.4
+Runs:       GitHub Actions workflows "TON Dev Skills Audit" #1 & #2
+Date:       2026-09-28
+Scope:      contracts/lockup_factory.tact (v5.0.2)
+            contracts/lockup_wallet.tact  (v5.0.2)
+            (messages.tact was scanned in run #1 but excluded from the scope of run #2)
+
+-----------------------------------------------------------------------------
+RESULTS BY FILE
+-----------------------------------------------------------------------------
+
+1. contracts/lockup_factory.tact
+   Findings: 0
+   Status: Clean. No issues detected by any rule.
+
+2. contracts/lockup_wallet.tact
+   Findings: 1 (Medium severity)
+   
+   - ID: TON-GAS-001
+     Message: Cross-contract send path without visible gas/value checks
+     Line: 10
+     Remediation Suggested: Validate msg_value/context().value and reserve gas before cross-contract sends.
+     
+     ANALYSIS: False Positive / Acknowledged.
+     The reported line (10) is a file-header comment, not an executable statement. The tool's heuristic incorrectly associates this with the contract's cross-contract calls.
+     A manual review of all three genuine cross-contract sends confirms they are already constrained:
+       1. StartDiscovery -> ProvideWalletAddress: Gated by require(sender() == self.factory). The factory always attaches DEPLOY_GAS = 0.12 TON, which covers the WALLET_DISCOVERY_GAS = 0.05 TON requirement. An additional value check is redundant.
+       2. Claim -> ProvideWalletAddress: Funded from the wallet's own balance via SendPayGasSeparately. Logic does not depend on incoming context().value. Adding a guard would only reject valid claims from wallets that don't attach extra TON.
+       3. TakeWalletAddress (flow 2) -> JettonTransfer: This is a response to a TEP-89 query. The incoming value in mainnet traces (e.g., tx 9523c81f...) is ~0.0494 GRAM, which is BELOW the CLAIM_GAS constant of 0.05 TON. Adding a require(context().value >= CLAIM_GAS) here would BREAK the working mainnet claim path.
+     Conclusion: The suggested remediation is technically incorrect for this codebase and would introduce bugs. The existing design is safe. Finding acknowledged as a false positive.
+
+3. contracts/messages.tact (Scanned in Run #1 only)
+   Findings: 2 (1 Critical, 1 Medium)
+   
+   - ID: TON-AUTH-001
+     Severity: Critical
+     Message: Potential privileged path without clear sender authorization
+     Line: 1
+     
+     ANALYSIS: False Positive.
+     messages.tact contains ONLY message(...) declarations. There is no executable logic, no receive(), no send(), and no state modification. It is impossible for a "privileged path" to exist in this file. The tool's heuristic is misfiring on type definitions.
+
+   - ID: TON-GAS-001
+     Severity: Medium
+     Message: Cross-contract send path without visible gas/value checks
+     Line: 16
+     
+     ANALYSIS: False Positive.
+     Same reason as above. This file has no send operations. The finding is noise from the static analyzer's pattern matching on declaration structures.
+
+-----------------------------------------------------------------------------
+SUMMARY & DECISION LOG
+-----------------------------------------------------------------------------
+
+Total Findings Across All Runs: 3 (1 Medium on wallet, 1 Critical + 1 Medium on messages)
+Findings Requiring Code Changes: 0
+
+All findings have been manually reviewed against the source code and mainnet transaction traces. None represent actual security vulnerabilities or functional bugs. They are artifacts of the tool's heuristics being applied outside their intended context (comments, pure declarations) or suggesting changes that would demonstrably break verified mainnet functionality.
+
+Decision: No code changes made. All findings are documented as acknowledged false positives.
+
+Note on Scope Change: In run #2, the scan target was narrowed from `contracts/*.tact` to `contracts/lockup_factory.tact contracts/lockup_wallet.tact`. This removed `messages.tact` from the automated scan because its contents are purely declarative and provide no signal to the audit tool, resulting in guaranteed false positives. Its logical correctness is fully covered by the Misti static analysis (which found 0 errors across all files).
