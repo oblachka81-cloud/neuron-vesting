@@ -4,7 +4,7 @@ import { LockupFactory } from '../build/LockupFactory_LockupFactory';
 import { LockupWallet } from '../build/LockupFactory_LockupWallet';
 import '@ton/test-utils';
 
-// ── Helpers ────────────────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────
 
 function makeLockPayload(qid: bigint, jm: Address, ben: Address, unlockAt: bigint): Cell {
     const inner = beginCell()
@@ -51,7 +51,7 @@ function makeExcesses(queryId: bigint) {
 
 // ── Suite ─────────────────────────────────────────────────────────────────
 
-describe('NEURON Vesting — v4 (isolated + TEP-89)', () => {
+describe('NEURON Vesting — v5.1.0 (isolated + TEP-89)', () => {
     let blockchain: Blockchain;
     let treasury: SandboxContract<TreasuryContract>;
     let user: SandboxContract<TreasuryContract>;
@@ -162,11 +162,8 @@ describe('NEURON Vesting — v4 (isolated + TEP-89)', () => {
             expect(res.transactions).toHaveTransaction({ from: treasury.address, to: factory.address, success: true });
         });
 
-        // ── v5.0.3 Finding #1 coverage (CHECK2, bijection F3) ──
-        it('56. whitelist cross-master wallet reuse -> rejected (CHECK2, bijection F3)', async () => {
+        it('7. whitelist cross-master wallet reuse -> rejected (CHECK2, bijection F3)', async () => {
             const otherMaster = await blockchain.treasury('otherMaster');
-            // fakeJettonWallet уже занят под jettonMaster (beforeEach).
-            // Попытка привязать ЕГО к другому мастеру = кросс-мастер mis-registration.
             const res = await factory.send(treasury.getSender(), { value: toNano('0.5') }, {
                 $$type: 'SetJettonWallet',
                 query_id: 2n,
@@ -176,13 +173,12 @@ describe('NEURON Vesting — v4 (isolated + TEP-89)', () => {
             expect(res.transactions).toHaveTransaction({
                 from: treasury.address, to: factory.address, success: false,
             });
-            // Состояние не рассогласовалось: старый маппинг цел, новый не появился.
             expect(await factory.getWalletOf(jettonMaster.address)).toEqualAddress(fakeJettonWallet.address);
             expect(await factory.getWalletOf(otherMaster.address)).toEqual(null);
             expect(await factory.getIsWalletSet(otherMaster.address)).toEqual(false);
         });
 
-        it('57. whitelist second independent pair -> ok (F3 holds both ways)', async () => {
+        it('8. whitelist second independent pair -> ok (F3 holds both ways)', async () => {
             const otherMaster = await blockchain.treasury('otherMaster');
             const otherWallet = await blockchain.treasury('otherWallet');
             const res = await factory.send(treasury.getSender(), { value: toNano('0.5') }, {
@@ -201,7 +197,7 @@ describe('NEURON Vesting — v4 (isolated + TEP-89)', () => {
 
     // ═══════════════════════════════════════════════════════════════════════
     describe('Factory: create lock', () => {
-        it('7. happy path creates lock', async () => {
+        it('9. happy path creates lock', async () => {
             const unlockAt = BigInt(blockchain.now! + 3600);
             const res = await sendCreateLock(unlockAt);
             expect(res.transactions).toHaveTransaction({ from: fakeJettonWallet.address, to: factory.address, success: true });
@@ -210,7 +206,7 @@ describe('NEURON Vesting — v4 (isolated + TEP-89)', () => {
             expect(await factory.getTonFees()).toEqual(FEE_TON);
         });
 
-        it('8. unknown sender -> rejected', async () => {
+        it('10. unknown sender -> rejected', async () => {
             const unlockAt = BigInt(blockchain.now! + 3600);
             const payload = makeLockPayload(1n, jettonMaster.address, beneficiary.address, unlockAt);
             const res = await factory.send(attacker.getSender(), { value: ATTACH_TON },
@@ -218,7 +214,7 @@ describe('NEURON Vesting — v4 (isolated + TEP-89)', () => {
             expect(res.transactions).toHaveTransaction({ from: attacker.address, to: factory.address, success: false });
         });
 
-        it('9. jm mismatch -> rejected', async () => {
+        it('11. jm mismatch -> rejected', async () => {
             const other = await blockchain.treasury('other');
             const unlockAt = BigInt(blockchain.now! + 3600);
             const payload = makeLockPayload(1n, other.address, beneficiary.address, unlockAt);
@@ -227,25 +223,25 @@ describe('NEURON Vesting — v4 (isolated + TEP-89)', () => {
             expect(res.transactions).toHaveTransaction({ from: fakeJettonWallet.address, to: factory.address, success: false });
         });
 
-        it('10. unlock_at in past -> rejected', async () => {
+        it('12. unlock_at in past -> rejected', async () => {
             const unlockAt = BigInt(blockchain.now! - 100);
             const res = await sendCreateLock(unlockAt);
             expect(res.transactions).toHaveTransaction({ from: fakeJettonWallet.address, to: factory.address, success: false });
         });
 
-        it('11. unlock_at > 10 years -> rejected', async () => {
+        it('13. unlock_at > 10 years -> rejected', async () => {
             const unlockAt = BigInt(blockchain.now! + 315360001);
             const res = await sendCreateLock(unlockAt);
             expect(res.transactions).toHaveTransaction({ from: fakeJettonWallet.address, to: factory.address, success: false });
         });
 
-        it('12. qid = 0 -> rejected', async () => {
+        it('14. qid = 0 -> rejected', async () => {
             const unlockAt = BigInt(blockchain.now! + 3600);
             const res = await sendCreateLock(unlockAt, 0n);
             expect(res.transactions).toHaveTransaction({ from: fakeJettonWallet.address, to: factory.address, success: false });
         });
 
-        it('13. insufficient TON -> rejected', async () => {
+        it('15. insufficient TON -> rejected', async () => {
             const unlockAt = BigInt(blockchain.now! + 3600);
             const payload = makeLockPayload(1n, jettonMaster.address, beneficiary.address, unlockAt);
             const res = await factory.send(fakeJettonWallet.getSender(), { value: toNano('0.5') },
@@ -253,7 +249,7 @@ describe('NEURON Vesting — v4 (isolated + TEP-89)', () => {
             expect(res.transactions).toHaveTransaction({ from: fakeJettonWallet.address, to: factory.address, success: false });
         });
 
-        it('14. malformed payload -> LockCreationFailed, next_id unchanged', async () => {
+        it('16. malformed payload -> LockCreationFailed, next_id unchanged', async () => {
             const bad = beginCell().storeBit(0).storeUint(0xbad, 32).endCell();
             const res = await factory.send(fakeJettonWallet.getSender(), { value: ATTACH_TON },
                 makeJettonNotify(1n, JETTON_AMOUNT, user.address, bad));
@@ -262,7 +258,7 @@ describe('NEURON Vesting — v4 (isolated + TEP-89)', () => {
             expect(await factory.getTonFees()).toEqual(0n);
         });
 
-        it('15. overpay refunded to creator', async () => {
+        it('17. overpay refunded to creator', async () => {
             const unlockAt = BigInt(blockchain.now! + 3600);
             const payload = makeLockPayload(1n, jettonMaster.address, beneficiary.address, unlockAt);
             const res = await factory.send(fakeJettonWallet.getSender(), { value: toNano('3') },
@@ -271,7 +267,7 @@ describe('NEURON Vesting — v4 (isolated + TEP-89)', () => {
             expect(await factory.getTonFees()).toEqual(FEE_TON);
         });
 
-        it('16. multiple locks increment next_id', async () => {
+        it('18. multiple locks increment next_id', async () => {
             const unlockAt = BigInt(blockchain.now! + 3600);
             for (let i = 0; i < 3; i++) {
                 await sendCreateLock(unlockAt, BigInt(i + 1));
@@ -282,13 +278,13 @@ describe('NEURON Vesting — v4 (isolated + TEP-89)', () => {
 
     // ═══════════════════════════════════════════════════════════════════════
     describe('Factory: TakeWalletAddress', () => {
-        it('17. qid without HIGH_BIT -> silently ignored', async () => {
+        it('19. qid without HIGH_BIT -> silently ignored', async () => {
             const res = await factory.send(jettonMaster.getSender(), { value: toNano('0.1') },
                 makeTakeWalletAddress(1n, attacker.address, attacker.address));
             expect(res.transactions).toHaveTransaction({ from: jettonMaster.address, to: factory.address, success: true });
         });
 
-        it('18. wrong master -> rejected', async () => {
+        it('20. wrong master -> rejected', async () => {
             const unlockAt = BigInt(blockchain.now! + 3600);
             await sendCreateLock(unlockAt);
             const childAddr = await factory.getPendingCreateOf(1n);
@@ -297,25 +293,22 @@ describe('NEURON Vesting — v4 (isolated + TEP-89)', () => {
             expect(res.transactions).toHaveTransaction({ from: attacker.address, to: factory.address, success: false });
         });
 
-        // ── v5.0.3 Finding #3 coverage (replay guard F8) ──
-        it('58. duplicate TakeWalletAddress -> silently dropped, no second transfer (F8)', async () => {
+        it('21. duplicate TakeWalletAddress -> silently dropped, no second transfer (F8)', async () => {
             const unlockAt = BigInt(blockchain.now! + 3600);
-            await sendCreateLock(unlockAt);                 // lock id = 1
+            await sendCreateLock(unlockAt);
             const childAddr = await factory.getPendingCreateOf(1n);
-            const childJw = await blockchain.treasury('childJw58');
+            const childJw = await blockchain.treasury('childJw21');
 
-            // Первый (валидный) ответ мастера -> форвард джеттонов уходит.
             const res1 = await factory.send(jettonMaster.getSender(), { value: toNano('0.1') },
                 makeTakeWalletAddress(1n | HIGH_BIT, childJw.address, childAddr!));
             expect(res1.transactions).toHaveTransaction({
                 from: jettonMaster.address, to: factory.address, success: true,
             });
             expect(res1.transactions).toHaveTransaction({
-                from: factory.address, to: fakeJettonWallet.address, op: 0x0f8a7ea5, // JettonTransfer
+                from: factory.address, to: fakeJettonWallet.address, op: 0x0f8a7ea5,
             });
             expect(await factory.getIsForwardConsumed(1n)).toEqual(true);
 
-            // Второй идентичный ответ -> success:true (не revert), но БЕЗ второго форварда.
             const res2 = await factory.send(jettonMaster.getSender(), { value: toNano('0.1') },
                 makeTakeWalletAddress(1n | HIGH_BIT, childJw.address, childAddr!));
             expect(res2.transactions).toHaveTransaction({
@@ -324,26 +317,24 @@ describe('NEURON Vesting — v4 (isolated + TEP-89)', () => {
             expect(res2.transactions).not.toHaveTransaction({
                 from: factory.address, to: fakeJettonWallet.address, op: 0x0f8a7ea5,
             });
-            // pending_create не тронут (bounce не было) — guard живёт, лок цел.
             expect(await factory.getPendingCreateOf(1n)).toEqualAddress(childAddr!);
             expect(await factory.getIsForwardConsumed(1n)).toEqual(true);
         });
 
-        it('59. wrong-owner TWA rejected AND does not consume forward (atomicity)', async () => {
+        it('22. wrong-owner TWA rejected AND does not consume forward (atomicity)', async () => {
             const unlockAt = BigInt(blockchain.now! + 3600);
-            await sendCreateLock(unlockAt);                 // lock id = 1
+            await sendCreateLock(unlockAt);
             const childAddr = await factory.getPendingCreateOf(1n);
-            const childJw = await blockchain.treasury('childJw59');
-            const wrongOwner = await blockchain.treasury('wrongOwner59');
+            const childJw = await blockchain.treasury('childJw22');
+            const wrongOwner = await blockchain.treasury('wrongOwner22');
 
             const resBad = await factory.send(jettonMaster.getSender(), { value: toNano('0.1') },
                 makeTakeWalletAddress(1n | HIGH_BIT, childJw.address, wrongOwner.address));
             expect(resBad.transactions).toHaveTransaction({
                 from: jettonMaster.address, to: factory.address, success: false,
             });
-            expect(await factory.getIsForwardConsumed(1n)).toEqual(false); // guard НЕ поставлен
+            expect(await factory.getIsForwardConsumed(1n)).toEqual(false);
 
-            // После битого — валидный всё ещё проходит и форвардит.
             const resOk = await factory.send(jettonMaster.getSender(), { value: toNano('0.1') },
                 makeTakeWalletAddress(1n | HIGH_BIT, childJw.address, childAddr!));
             expect(resOk.transactions).toHaveTransaction({
@@ -352,14 +343,14 @@ describe('NEURON Vesting — v4 (isolated + TEP-89)', () => {
             expect(await factory.getIsForwardConsumed(1n)).toEqual(true);
         });
 
-        it('60. forward consumed for id=1 does not block id=2 (per-id isolation)', async () => {
+        it('23. forward consumed for id=1 does not block id=2 (per-id isolation)', async () => {
             const unlockAt = BigInt(blockchain.now! + 3600);
-            await sendCreateLock(unlockAt, 1n);             // id = 1
-            await sendCreateLock(unlockAt, 2n);             // id = 2
+            await sendCreateLock(unlockAt, 1n);
+            await sendCreateLock(unlockAt, 2n);
             const child1 = await factory.getPendingCreateOf(1n);
             const child2 = await factory.getPendingCreateOf(2n);
-            const jw1 = await blockchain.treasury('jw1_60');
-            const jw2 = await blockchain.treasury('jw2_60');
+            const jw1 = await blockchain.treasury('jw1_23');
+            const jw2 = await blockchain.treasury('jw2_23');
 
             await factory.send(jettonMaster.getSender(), { value: toNano('0.1') },
                 makeTakeWalletAddress(1n | HIGH_BIT, jw1.address, child1!));
@@ -372,13 +363,13 @@ describe('NEURON Vesting — v4 (isolated + TEP-89)', () => {
                 from: factory.address, to: fakeJettonWallet.address, op: 0x0f8a7ea5,
             });
             expect(await factory.getIsForwardConsumed(2n)).toEqual(true);
-            expect(await factory.getIsForwardConsumed(1n)).toEqual(true); // id=1 не сбросился
+            expect(await factory.getIsForwardConsumed(1n)).toEqual(true);
         });
     });
 
     // ═══════════════════════════════════════════════════════════════════════
     describe('Factory: WithdrawFees', () => {
-        it('19. withdraw by treasury -> ok', async () => {
+        it('24. withdraw by treasury -> ok', async () => {
             const unlockAt = BigInt(blockchain.now! + 3600);
             await sendCreateLock(unlockAt);
             const res = await factory.send(treasury.getSender(), { value: toNano('0.5') }, {
@@ -392,7 +383,7 @@ describe('NEURON Vesting — v4 (isolated + TEP-89)', () => {
             expect(await factory.getFeeOf(jettonMaster.address)).toEqual(0n);
         });
 
-        it('20. withdraw by non-treasury -> rejected', async () => {
+        it('25. withdraw by non-treasury -> rejected', async () => {
             const unlockAt = BigInt(blockchain.now! + 3600);
             await sendCreateLock(unlockAt);
             const res = await factory.send(attacker.getSender(), { value: toNano('0.5') }, {
@@ -405,7 +396,7 @@ describe('NEURON Vesting — v4 (isolated + TEP-89)', () => {
             expect(res.transactions).toHaveTransaction({ from: attacker.address, to: factory.address, success: false });
         });
 
-        it('21. withdraw more than available -> rejected', async () => {
+        it('26. withdraw more than available -> rejected', async () => {
             const unlockAt = BigInt(blockchain.now! + 3600);
             await sendCreateLock(unlockAt);
             const res = await factory.send(treasury.getSender(), { value: toNano('0.5') }, {
@@ -418,7 +409,7 @@ describe('NEURON Vesting — v4 (isolated + TEP-89)', () => {
             expect(res.transactions).toHaveTransaction({ from: treasury.address, to: factory.address, success: false });
         });
 
-        it('22. qid reuse -> rejected', async () => {
+        it('27. qid reuse -> rejected', async () => {
             const unlockAt = BigInt(blockchain.now! + 3600);
             await sendCreateLock(unlockAt);
             await factory.send(treasury.getSender(), { value: toNano('0.5') }, {
@@ -434,7 +425,7 @@ describe('NEURON Vesting — v4 (isolated + TEP-89)', () => {
             expect(res.transactions).toHaveTransaction({ from: treasury.address, to: factory.address, success: false });
         });
 
-        it('23. zero amount -> rejected', async () => {
+        it('28. zero amount -> rejected', async () => {
             const unlockAt = BigInt(blockchain.now! + 3600);
             await sendCreateLock(unlockAt);
             const res = await factory.send(treasury.getSender(), { value: toNano('0.5') }, {
@@ -448,7 +439,7 @@ describe('NEURON Vesting — v4 (isolated + TEP-89)', () => {
 
     // ═══════════════════════════════════════════════════════════════════════
     describe('Factory: WithdrawTonFees', () => {
-        it('24. withdraw by treasury -> ok', async () => {
+        it('29. withdraw by treasury -> ok', async () => {
             const unlockAt = BigInt(blockchain.now! + 3600);
             await sendCreateLock(unlockAt);
             const res = await factory.send(treasury.getSender(), { value: toNano('0.2') }, {
@@ -459,7 +450,7 @@ describe('NEURON Vesting — v4 (isolated + TEP-89)', () => {
             expect(await factory.getTonFees()).toEqual(0n);
         });
 
-        it('25. withdraw by non-treasury -> rejected', async () => {
+        it('30. withdraw by non-treasury -> rejected', async () => {
             const unlockAt = BigInt(blockchain.now! + 3600);
             await sendCreateLock(unlockAt);
             const res = await factory.send(attacker.getSender(), { value: toNano('0.2') }, {
@@ -469,7 +460,7 @@ describe('NEURON Vesting — v4 (isolated + TEP-89)', () => {
             expect(res.transactions).toHaveTransaction({ from: attacker.address, to: factory.address, success: false });
         });
 
-        it('26. more than available -> rejected', async () => {
+        it('31. more than available -> rejected', async () => {
             const unlockAt = BigInt(blockchain.now! + 3600);
             await sendCreateLock(unlockAt);
             const res = await factory.send(treasury.getSender(), { value: toNano('0.2') }, {
@@ -479,7 +470,7 @@ describe('NEURON Vesting — v4 (isolated + TEP-89)', () => {
             expect(res.transactions).toHaveTransaction({ from: treasury.address, to: factory.address, success: false });
         });
 
-        it('27. qid reuse -> rejected', async () => {
+        it('32. qid reuse -> rejected', async () => {
             const unlockAt = BigInt(blockchain.now! + 3600);
             await sendCreateLock(unlockAt);
             await factory.send(treasury.getSender(), { value: toNano('0.2') }, {
@@ -496,7 +487,7 @@ describe('NEURON Vesting — v4 (isolated + TEP-89)', () => {
 
     // ═══════════════════════════════════════════════════════════════════════
     describe('Factory: Rescue', () => {
-        it('28. RescueTon by treasury -> ok', async () => {
+        it('33. RescueTon by treasury -> ok', async () => {
             const res = await factory.send(treasury.getSender(), { value: toNano('0.2') }, {
                 $$type: 'RescueTon', query_id: 300n,
                 amount: toNano('1'), destination: treasury.address,
@@ -504,7 +495,7 @@ describe('NEURON Vesting — v4 (isolated + TEP-89)', () => {
             expect(res.transactions).toHaveTransaction({ from: factory.address, to: treasury.address, success: true });
         });
 
-        it('29. RescueTon by non-treasury -> rejected', async () => {
+        it('34. RescueTon by non-treasury -> rejected', async () => {
             const res = await factory.send(attacker.getSender(), { value: toNano('0.2') }, {
                 $$type: 'RescueTon', query_id: 300n,
                 amount: toNano('1'), destination: attacker.address,
@@ -512,7 +503,7 @@ describe('NEURON Vesting — v4 (isolated + TEP-89)', () => {
             expect(res.transactions).toHaveTransaction({ from: attacker.address, to: factory.address, success: false });
         });
 
-        it('30. RescueJetton by treasury -> ok', async () => {
+        it('35. RescueJetton by treasury -> ok', async () => {
             const res = await factory.send(treasury.getSender(), { value: toNano('0.5') }, {
                 $$type: 'RescueJetton', query_id: 301n,
                 jetton_master: jettonMaster.address,
@@ -521,7 +512,7 @@ describe('NEURON Vesting — v4 (isolated + TEP-89)', () => {
             expect(res.transactions).toHaveTransaction({ from: treasury.address, to: factory.address, success: true });
         });
 
-        it('31. RescueJetton qid reuse -> rejected', async () => {
+        it('36. RescueJetton qid reuse -> rejected', async () => {
             await factory.send(treasury.getSender(), { value: toNano('0.5') }, {
                 $$type: 'RescueJetton', query_id: 301n,
                 jetton_master: jettonMaster.address,
@@ -538,7 +529,7 @@ describe('NEURON Vesting — v4 (isolated + TEP-89)', () => {
 
     // ═══════════════════════════════════════════════════════════════════════
     describe('Factory: fee management', () => {
-        it('32. SetFeeBps by treasury -> ok', async () => {
+        it('37. SetFeeBps by treasury -> ok', async () => {
             const res = await factory.send(treasury.getSender(), { value: toNano('0.2') }, {
                 $$type: 'SetFeeBps', query_id: 400n, fee_bps: 100n,
             });
@@ -546,21 +537,21 @@ describe('NEURON Vesting — v4 (isolated + TEP-89)', () => {
             expect(await factory.getFeeBps()).toEqual(100n);
         });
 
-        it('33. SetFeeBps above 10% -> rejected', async () => {
+        it('38. SetFeeBps above 10% -> rejected', async () => {
             const res = await factory.send(treasury.getSender(), { value: toNano('0.2') }, {
                 $$type: 'SetFeeBps', query_id: 400n, fee_bps: 2000n,
             });
             expect(res.transactions).toHaveTransaction({ from: treasury.address, to: factory.address, success: false });
         });
 
-        it('34. SetFeeBps by non-treasury -> rejected', async () => {
+        it('39. SetFeeBps by non-treasury -> rejected', async () => {
             const res = await factory.send(attacker.getSender(), { value: toNano('0.2') }, {
                 $$type: 'SetFeeBps', query_id: 400n, fee_bps: 100n,
             });
             expect(res.transactions).toHaveTransaction({ from: attacker.address, to: factory.address, success: false });
         });
 
-        it('35. SetFeeTon by treasury -> ok', async () => {
+        it('40. SetFeeTon by treasury -> ok', async () => {
             const res = await factory.send(treasury.getSender(), { value: toNano('0.2') }, {
                 $$type: 'SetFeeTon', query_id: 401n, fee_ton: toNano('2'),
             });
@@ -589,27 +580,27 @@ describe('NEURON Vesting — v4 (isolated + TEP-89)', () => {
             await wallet.send(treasury.getSender(), { value: toNano('2') }, null);
         });
 
-        it('36. StartDiscovery only from factory', async () => {
+        it('41. StartDiscovery only from factory', async () => {
             const res = await wallet.send(attacker.getSender(), { value: toNano('0.2') }, {
                 $$type: 'StartDiscovery', query_id: 1n,
             });
             expect(res.transactions).toHaveTransaction({ from: attacker.address, to: wallet.address, success: false });
         });
 
-        it('37. TakeWalletAddress only from master', async () => {
-            const res = await wallet.send(attacker.getSender(), { value: toNano('0.1') }, 
+        it('42. TakeWalletAddress only from master', async () => {
+            const res = await wallet.send(attacker.getSender(), { value: toNano('0.1') },
                 makeTakeWalletAddress(0n, fakeJettonWallet.address, wallet.address));
             expect(res.transactions).toHaveTransaction({ from: attacker.address, to: wallet.address, success: false });
         });
 
-        it('38. discovery sets jetton_wallet', async () => {
+        it('43. discovery sets jetton_wallet', async () => {
             const res = await wallet.send(jettonMaster.getSender(), { value: toNano('0.1') },
                 makeTakeWalletAddress(0n, fakeJettonWallet.address, wallet.address));
             expect(res.transactions).toHaveTransaction({ from: jettonMaster.address, to: wallet.address, success: true });
             expect(await wallet.getJettonWallet()).toEqualAddress(fakeJettonWallet.address);
         });
 
-        it('39. JettonNotification from correct wallet funds', async () => {
+        it('44. JettonNotification from correct wallet funds', async () => {
             await wallet.send(jettonMaster.getSender(), { value: toNano('0.1') },
                 makeTakeWalletAddress(0n, fakeJettonWallet.address, wallet.address));
 
@@ -624,7 +615,7 @@ describe('NEURON Vesting — v4 (isolated + TEP-89)', () => {
             expect(await wallet.getIsFunded()).toEqual(true);
         });
 
-        it('40. JettonNotification from wrong wallet -> rejected', async () => {
+        it('45. JettonNotification from wrong wallet -> rejected', async () => {
             await wallet.send(jettonMaster.getSender(), { value: toNano('0.1') },
                 makeTakeWalletAddress(0n, fakeJettonWallet.address, wallet.address));
 
@@ -638,7 +629,7 @@ describe('NEURON Vesting — v4 (isolated + TEP-89)', () => {
             expect(res.transactions).toHaveTransaction({ from: attacker.address, to: wallet.address, success: false });
         });
 
-        it('41. Claim before unlock -> rejected', async () => {
+        it('46. Claim before unlock -> rejected', async () => {
             await wallet.send(jettonMaster.getSender(), { value: toNano('0.1') },
                 makeTakeWalletAddress(0n, fakeJettonWallet.address, wallet.address));
             await wallet.send(fakeJettonWallet.getSender(), { value: toNano('0.1') }, {
@@ -655,7 +646,7 @@ describe('NEURON Vesting — v4 (isolated + TEP-89)', () => {
             expect(res.transactions).toHaveTransaction({ from: beneficiary.address, to: wallet.address, success: false });
         });
 
-        it('42. Claim by non-beneficiary -> rejected', async () => {
+        it('47. Claim by non-beneficiary -> rejected', async () => {
             await wallet.send(jettonMaster.getSender(), { value: toNano('0.1') },
                 makeTakeWalletAddress(0n, fakeJettonWallet.address, wallet.address));
             await wallet.send(fakeJettonWallet.getSender(), { value: toNano('0.1') }, {
@@ -672,7 +663,7 @@ describe('NEURON Vesting — v4 (isolated + TEP-89)', () => {
             expect(res.transactions).toHaveTransaction({ from: attacker.address, to: wallet.address, success: false });
         });
 
-        it('43. Claim with qid = 0 -> rejected', async () => {
+        it('48. Claim with qid = 0 -> rejected', async () => {
             await wallet.send(jettonMaster.getSender(), { value: toNano('0.1') },
                 makeTakeWalletAddress(0n, fakeJettonWallet.address, wallet.address));
             await wallet.send(fakeJettonWallet.getSender(), { value: toNano('0.1') }, {
@@ -689,7 +680,7 @@ describe('NEURON Vesting — v4 (isolated + TEP-89)', () => {
             expect(res.transactions).toHaveTransaction({ from: beneficiary.address, to: wallet.address, success: false });
         });
 
-        it('44. foreign JettonExcesses -> rejected with not-our-wallet', async () => {
+        it('49. foreign JettonExcesses -> rejected with not-our-wallet', async () => {
             const unlockAt = BigInt(blockchain.now! + 100);
             const wallet = blockchain.openContract(
                 await LockupWallet.fromInit(
@@ -720,7 +711,7 @@ describe('NEURON Vesting — v4 (isolated + TEP-89)', () => {
             });
         });
 
-        it('45. availableClaimable = 0 before unlock', async () => {
+        it('50. availableClaimable = 0 before unlock', async () => {
             await wallet.send(jettonMaster.getSender(), { value: toNano('0.1') },
                 makeTakeWalletAddress(0n, fakeJettonWallet.address, wallet.address));
             await wallet.send(fakeJettonWallet.getSender(), { value: toNano('0.1') }, {
@@ -733,7 +724,7 @@ describe('NEURON Vesting — v4 (isolated + TEP-89)', () => {
             expect(await wallet.getAvailableClaimable()).toEqual(0n);
         });
 
-        it('46. availableClaimable = LOCK_AMOUNT after unlock', async () => {
+        it('51. availableClaimable = LOCK_AMOUNT after unlock', async () => {
             const unlockAt = BigInt(blockchain.now! + 100);
             wallet = blockchain.openContract(
                 await LockupWallet.fromInit(
@@ -756,18 +747,19 @@ describe('NEURON Vesting — v4 (isolated + TEP-89)', () => {
             expect(await wallet.getAvailableClaimable()).toEqual(LOCK_AMOUNT);
         });
 
-        it('47. getters reflect state', async () => {
+        it('52. getters reflect state', async () => {
             expect(await wallet.getLockId()).toEqual(1n);
             expect(await wallet.getBeneficiaryGet()).toEqualAddress(beneficiary.address);
             expect(await wallet.getClaimedAmount()).toEqual(0n);
             expect(await wallet.getIsFunded()).toEqual(false);
             expect(await wallet.getIsPendingClaim()).toEqual(false);
+            expect(await wallet.getPendingSetAt()).toEqual(0n);
         });
     });
 
     // ═══════════════════════════════════════════════════════════════════════
-    describe('LockupWallet: happy-path claim + Excesses', () => {
-        it('48. claim after unlock → TakeWalletAddress → Excesses clears pending + self-destruct', async () => {
+    describe('LockupWallet: v5.1.0 claim lifecycle', () => {
+        it('53. claim after unlock -> flow2 dispatch (claimed=0) -> Excesses confirms + self-destruct', async () => {
             const unlockAt = BigInt(blockchain.now! + 100);
             const wallet = blockchain.openContract(
                 await LockupWallet.fromInit(
@@ -798,11 +790,8 @@ describe('NEURON Vesting — v4 (isolated + TEP-89)', () => {
             blockchain.now = Number(unlockAt) + 10;
 
             const claimQid = 777n;
-            const resClaim = await wallet.send(beneficiary.getSender(), { value: toNano('0.5') }, {
+            await wallet.send(beneficiary.getSender(), { value: toNano('0.5') }, {
                 $$type: 'Claim', query_id: claimQid, amount: 0n,
-            });
-            expect(resClaim.transactions).toHaveTransaction({
-                from: beneficiary.address, to: wallet.address, success: true,
             });
             expect(await wallet.getIsPendingClaim()).toEqual(true);
             expect(await wallet.getClaimedAmount()).toEqual(0n);
@@ -813,19 +802,22 @@ describe('NEURON Vesting — v4 (isolated + TEP-89)', () => {
             expect(resTake.transactions).toHaveTransaction({
                 from: jettonMaster.address, to: wallet.address, success: true,
             });
-            expect(await wallet.getClaimedAmount()).toEqual(LOCK_AMOUNT);
             expect(resTake.transactions).toHaveTransaction({
                 from: wallet.address, to: fakeJettonWallet.address, op: 0x0f8a7ea5,
             });
+            expect(await wallet.getClaimedAmount()).toEqual(0n);
 
-            await wallet.send(fakeJettonWallet.getSender(), { value: toNano('0.05') },
+            const resExcess = await wallet.send(fakeJettonWallet.getSender(), { value: toNano('0.05') },
                 makeExcesses(claimQid));
+            expect(resExcess.transactions).toHaveTransaction({
+                from: wallet.address, to: beneficiary.address, success: true,
+            });
 
             const contractState = await blockchain.getContract(wallet.address);
             expect(contractState.balance).toBe(0n);
         });
 
-        it('49. second claim while first pending → rejected', async () => {
+        it('54. second claim while first pending -> rejected', async () => {
             const unlockAt = BigInt(blockchain.now! + 100);
             const wallet = blockchain.openContract(
                 await LockupWallet.fromInit(
@@ -857,7 +849,7 @@ describe('NEURON Vesting — v4 (isolated + TEP-89)', () => {
             });
         });
 
-        it('50. wrong amount deposit does NOT mark funded', async () => {
+        it('55. wrong amount deposit does NOT mark funded', async () => {
             const unlockAt = BigInt(blockchain.now! + 3600);
             const wallet = blockchain.openContract(
                 await LockupWallet.fromInit(
@@ -882,7 +874,7 @@ describe('NEURON Vesting — v4 (isolated + TEP-89)', () => {
             expect(await wallet.getIsFunded()).toEqual(false);
         });
 
-        it('51. notify arrives before discovery → fund_sender → discovery marks funded', async () => {
+        it('56. notify arrives before discovery -> fund_sender -> discovery marks funded', async () => {
             const unlockAt = BigInt(blockchain.now! + 3600);
             const wallet = blockchain.openContract(
                 await LockupWallet.fromInit(
@@ -907,14 +899,11 @@ describe('NEURON Vesting — v4 (isolated + TEP-89)', () => {
             expect(await wallet.getJettonWallet()).toEqualAddress(fakeJettonWallet.address);
             expect(await wallet.getIsFunded()).toEqual(true);
         });
-    }); // FIX: close describe block for tests 48-51
+    });
 
-    // ═══════════════════════════════════════════════════════════════════
-    // v5.0.1 — JettonExcesses from either side of the TEP-74 transfer chain
-    // ═══════════════════════════════════════════════════════════════════
-
+    // ═══════════════════════════════════════════════════════════════════════
     describe('LockupWallet: v5.0.1 Excesses from either side', () => {
-        it('52. Excesses from beneficiary_wallet settles claim + sweeps + self-destructs', async () => {
+        it('57. Excesses from beneficiary_wallet settles claim + sweeps + self-destructs', async () => {
             const unlockAt = BigInt(blockchain.now! + 100);
             const wallet = blockchain.openContract(
                 await LockupWallet.fromInit(
@@ -938,10 +927,14 @@ describe('NEURON Vesting — v4 (isolated + TEP-89)', () => {
                 $$type: 'Claim', query_id: claimQid, amount: 0n,
             });
 
-            const benJW = await blockchain.treasury('benJW52');
-            await wallet.send(jettonMaster.getSender(), { value: toNano('0.1') },
+            const benJW = await blockchain.treasury('benJW57');
+            const resTake = await wallet.send(jettonMaster.getSender(), { value: toNano('0.1') },
                 makeTakeWalletAddress(claimQid, benJW.address, beneficiary.address));
+            expect(resTake.transactions).toHaveTransaction({
+                from: wallet.address, to: fakeJettonWallet.address, op: 0x0f8a7ea5,
+            });
             expect(await wallet.getBeneficiaryWallet()).toEqualAddress(benJW.address);
+            expect(await wallet.getClaimedAmount()).toEqual(0n);
 
             const res = await wallet.send(benJW.getSender(), { value: toNano('0.05') }, {
                 $$type: 'JettonExcesses', query_id: claimQid,
@@ -952,11 +945,12 @@ describe('NEURON Vesting — v4 (isolated + TEP-89)', () => {
             expect(res.transactions).toHaveTransaction({
                 from: wallet.address, to: beneficiary.address, success: true,
             });
+
             const state = await blockchain.getContract(wallet.address);
             expect(state.balance).toBe(0n);
         });
 
-        it('53. Excesses from jetton_wallet after claim also settles (sending-side path)', async () => {
+        it('58. Excesses from jetton_wallet after claim also settles (sending-side path)', async () => {
             const unlockAt = BigInt(blockchain.now! + 100);
             const wallet = blockchain.openContract(
                 await LockupWallet.fromInit(
@@ -979,9 +973,13 @@ describe('NEURON Vesting — v4 (isolated + TEP-89)', () => {
                 $$type: 'Claim', query_id: claimQid, amount: 0n,
             });
 
-            const benJW = await blockchain.treasury('benJW53');
-            await wallet.send(jettonMaster.getSender(), { value: toNano('0.1') },
+            const benJW = await blockchain.treasury('benJW58');
+            const resTake = await wallet.send(jettonMaster.getSender(), { value: toNano('0.1') },
                 makeTakeWalletAddress(claimQid, benJW.address, beneficiary.address));
+            expect(resTake.transactions).toHaveTransaction({
+                from: wallet.address, to: fakeJettonWallet.address, op: 0x0f8a7ea5,
+            });
+            expect(await wallet.getClaimedAmount()).toEqual(0n);
 
             const res = await wallet.send(fakeJettonWallet.getSender(), { value: toNano('0.05') }, {
                 $$type: 'JettonExcesses', query_id: claimQid,
@@ -992,11 +990,12 @@ describe('NEURON Vesting — v4 (isolated + TEP-89)', () => {
             expect(res.transactions).toHaveTransaction({
                 from: wallet.address, to: beneficiary.address, success: true,
             });
+
             const state = await blockchain.getContract(wallet.address);
             expect(state.balance).toBe(0n);
         });
 
-        it('54. foreign Excesses (neither jw nor bw) -> rejected', async () => {
+        it('59. foreign Excesses (neither jw nor bw) -> rejected', async () => {
             const unlockAt = BigInt(blockchain.now! + 100);
             const wallet = blockchain.openContract(
                 await LockupWallet.fromInit(
@@ -1018,11 +1017,11 @@ describe('NEURON Vesting — v4 (isolated + TEP-89)', () => {
             await wallet.send(beneficiary.getSender(), { value: toNano('0.5') }, {
                 $$type: 'Claim', query_id: claimQid, amount: 0n,
             });
-            const benJW = await blockchain.treasury('benJW54');
+            const benJW = await blockchain.treasury('benJW59');
             await wallet.send(jettonMaster.getSender(), { value: toNano('0.1') },
                 makeTakeWalletAddress(claimQid, benJW.address, beneficiary.address));
 
-            const foreign = await blockchain.treasury('foreign54');
+            const foreign = await blockchain.treasury('foreign59');
             const res = await wallet.send(foreign.getSender(), { value: toNano('0.05') }, {
                 $$type: 'JettonExcesses', query_id: claimQid,
             });
@@ -1033,7 +1032,7 @@ describe('NEURON Vesting — v4 (isolated + TEP-89)', () => {
             expect(state.balance).toBeGreaterThan(0n);
         });
 
-        it('55. Excesses before any claim -> success, no sweep (pending_claim = false)', async () => {
+        it('60. Excesses before any claim -> success, no sweep (pending_claim = false)', async () => {
             const unlockAt = BigInt(blockchain.now! + 3600);
             const wallet = blockchain.openContract(
                 await LockupWallet.fromInit(
@@ -1061,6 +1060,300 @@ describe('NEURON Vesting — v4 (isolated + TEP-89)', () => {
             });
             const state = await blockchain.getContract(wallet.address);
             expect(state.balance).toBeGreaterThan(0n);
+        });
+    });
+
+    // ═══════════════════════════════════════════════════════════════════════
+    describe('LockupWallet: v5.0.3 Replay Guard (Finding #4)', () => {
+        it('61. Duplicate TakeWalletAddress flow 2 -> silently dropped, no second transfer', async () => {
+            const unlockAt = BigInt(blockchain.now! + 100);
+            const wallet = blockchain.openContract(
+                await LockupWallet.fromInit(
+                    601n, factory.address, jettonMaster.address,
+                    beneficiary.address, user.address, LOCK_AMOUNT, unlockAt,
+                ),
+            );
+            await wallet.send(treasury.getSender(), { value: toNano('2') }, null);
+
+            await wallet.send(jettonMaster.getSender(), { value: toNano('0.1') },
+                makeTakeWalletAddress(0n, fakeJettonWallet.address, wallet.address));
+            await wallet.send(fakeJettonWallet.getSender(), { value: toNano('0.1') }, {
+                $$type: 'JettonNotification',
+                query_id: 1n, amount: LOCK_AMOUNT, sender: user.address,
+                forward_payload: beginCell().endCell().asSlice(),
+            });
+            blockchain.now = Number(unlockAt) + 10;
+
+            const claimQid = 602n;
+            await wallet.send(beneficiary.getSender(), { value: toNano('0.5') }, {
+                $$type: 'Claim', query_id: claimQid, amount: 0n,
+            });
+
+            const benJW = await blockchain.treasury('benJW61');
+
+            const res1 = await wallet.send(jettonMaster.getSender(), { value: toNano('0.1') },
+                makeTakeWalletAddress(claimQid, benJW.address, beneficiary.address));
+            expect(res1.transactions).toHaveTransaction({
+                from: jettonMaster.address, to: wallet.address, success: true,
+            });
+            expect(res1.transactions).toHaveTransaction({
+                from: wallet.address, to: fakeJettonWallet.address, op: 0x0f8a7ea5,
+            });
+            expect(await wallet.getIsClaimConsumed(claimQid)).toEqual(true);
+            expect(await wallet.getClaimedAmount()).toEqual(0n);
+
+            const res2 = await wallet.send(jettonMaster.getSender(), { value: toNano('0.1') },
+                makeTakeWalletAddress(claimQid, benJW.address, beneficiary.address));
+            expect(res2.transactions).toHaveTransaction({
+                from: jettonMaster.address, to: wallet.address, success: true,
+            });
+            expect(res2.transactions).not.toHaveTransaction({
+                from: wallet.address, to: fakeJettonWallet.address, op: 0x0f8a7ea5,
+            });
+            expect(await wallet.getClaimedAmount()).toEqual(0n);
+        });
+
+        it('62. Settlement clears consumed_claim -> same qid reusable (no DoS)', async () => {
+            const unlockAt = BigInt(blockchain.now! + 100);
+            const wallet = blockchain.openContract(
+                await LockupWallet.fromInit(
+                    603n, factory.address, jettonMaster.address,
+                    beneficiary.address, user.address, LOCK_AMOUNT, unlockAt,
+                ),
+            );
+            await wallet.send(treasury.getSender(), { value: toNano('2') }, null);
+            await wallet.send(jettonMaster.getSender(), { value: toNano('0.1') },
+                makeTakeWalletAddress(0n, fakeJettonWallet.address, wallet.address));
+            await wallet.send(fakeJettonWallet.getSender(), { value: toNano('0.1') }, {
+                $$type: 'JettonNotification',
+                query_id: 1n, amount: LOCK_AMOUNT, sender: user.address,
+                forward_payload: beginCell().endCell().asSlice(),
+            });
+            blockchain.now = Number(unlockAt) + 10;
+
+            const claimQid = 604n;
+            const HALF = 500n;
+
+            await wallet.send(beneficiary.getSender(), { value: toNano('0.5') }, {
+                $$type: 'Claim', query_id: claimQid, amount: HALF,
+            });
+            const benJW = await blockchain.treasury('benJW62');
+            await wallet.send(jettonMaster.getSender(), { value: toNano('0.1') },
+                makeTakeWalletAddress(claimQid, benJW.address, beneficiary.address));
+            expect(await wallet.getIsClaimConsumed(claimQid)).toEqual(true);
+
+            await wallet.send(fakeJettonWallet.getSender(), { value: toNano('0.05') },
+                makeExcesses(claimQid));
+            expect(await wallet.getClaimedAmount()).toEqual(HALF);
+            expect(await wallet.getIsClaimConsumed(claimQid)).toEqual(false);
+            expect(await wallet.getIsPendingClaim()).toEqual(false);
+
+            await wallet.send(beneficiary.getSender(), { value: toNano('0.5') }, {
+                $$type: 'Claim', query_id: claimQid, amount: 1n,
+            });
+            const benJW2 = await blockchain.treasury('benJW62b');
+            const res2 = await wallet.send(jettonMaster.getSender(), { value: toNano('0.1') },
+                makeTakeWalletAddress(claimQid, benJW2.address, beneficiary.address));
+            expect(res2.transactions).toHaveTransaction({
+                from: wallet.address, to: fakeJettonWallet.address, op: 0x0f8a7ea5,
+            });
+            expect(await wallet.getIsClaimConsumed(claimQid)).toEqual(true);
+            expect(await wallet.getClaimedAmount()).toEqual(HALF);
+        });
+    });
+
+    // ═══════════════════════════════════════════════════════════════════════
+    describe('LockupWallet: v5.1.0 Reset (W4 closed)', () => {
+        it('63. Reset after timeout recovers a stuck claim (W4 closed)', async () => {
+            const unlockAt = BigInt(blockchain.now! + 100);
+            const wallet = blockchain.openContract(
+                await LockupWallet.fromInit(
+                    701n, factory.address, jettonMaster.address,
+                    beneficiary.address, user.address, LOCK_AMOUNT, unlockAt,
+                ),
+            );
+            await wallet.send(treasury.getSender(), { value: toNano('2') }, null);
+            await wallet.send(jettonMaster.getSender(), { value: toNano('0.1') },
+                makeTakeWalletAddress(0n, fakeJettonWallet.address, wallet.address));
+            await wallet.send(fakeJettonWallet.getSender(), { value: toNano('0.1') }, {
+                $$type: 'JettonNotification',
+                query_id: 1n, amount: LOCK_AMOUNT, sender: user.address,
+                forward_payload: beginCell().endCell().asSlice(),
+            });
+            blockchain.now = Number(unlockAt) + 10;
+
+            const qid = 702n;
+            await wallet.send(beneficiary.getSender(), { value: toNano('0.5') }, {
+                $$type: 'Claim', query_id: qid, amount: 0n,
+            });
+            await wallet.send(jettonMaster.getSender(), { value: toNano('0.1') },
+                makeTakeWalletAddress(qid, fakeJettonWallet.address, beneficiary.address));
+            expect(await wallet.getIsPendingClaim()).toEqual(true);
+            expect(await wallet.getClaimedAmount()).toEqual(0n);
+            expect(await wallet.getIsClaimConsumed(qid)).toEqual(true);
+
+            const setAt = await wallet.getPendingSetAt();
+            blockchain.now = Number(setAt) + 3601;
+
+            const resReset = await wallet.send(beneficiary.getSender(), { value: toNano('0.3') }, {
+                $$type: 'ResetPendingClaim', query_id: 1n,
+            });
+            expect(resReset.transactions).toHaveTransaction({
+                from: beneficiary.address, to: wallet.address, success: true,
+            });
+            expect(await wallet.getIsPendingClaim()).toEqual(false);
+            expect(await wallet.getIsClaimConsumed(qid)).toEqual(false);
+            expect(await wallet.getClaimedAmount()).toEqual(0n);
+
+            await wallet.send(beneficiary.getSender(), { value: toNano('0.5') }, {
+                $$type: 'Claim', query_id: qid, amount: 0n,
+            });
+            const resRecoverTake = await wallet.send(jettonMaster.getSender(), { value: toNano('0.1') },
+                makeTakeWalletAddress(qid, fakeJettonWallet.address, beneficiary.address));
+            expect(resRecoverTake.transactions).toHaveTransaction({
+                from: wallet.address, to: fakeJettonWallet.address, op: 0x0f8a7ea5,
+            });
+
+            const resRecoverExcess = await wallet.send(fakeJettonWallet.getSender(), { value: toNano('0.05') },
+                makeExcesses(qid));
+            expect(resRecoverExcess.transactions).toHaveTransaction({
+                from: wallet.address, to: beneficiary.address, success: true,
+            });
+
+            const state = await blockchain.getContract(wallet.address);
+            expect(state.balance).toBe(0n);
+        });
+
+        it('64. Reset before timeout -> rejected', async () => {
+            const unlockAt = BigInt(blockchain.now! + 100);
+            const wallet = blockchain.openContract(
+                await LockupWallet.fromInit(
+                    703n, factory.address, jettonMaster.address,
+                    beneficiary.address, user.address, LOCK_AMOUNT, unlockAt,
+                ),
+            );
+            await wallet.send(treasury.getSender(), { value: toNano('2') }, null);
+            await wallet.send(jettonMaster.getSender(), { value: toNano('0.1') },
+                makeTakeWalletAddress(0n, fakeJettonWallet.address, wallet.address));
+            await wallet.send(fakeJettonWallet.getSender(), { value: toNano('0.1') }, {
+                $$type: 'JettonNotification',
+                query_id: 1n, amount: LOCK_AMOUNT, sender: user.address,
+                forward_payload: beginCell().endCell().asSlice(),
+            });
+            blockchain.now = Number(unlockAt) + 10;
+
+            await wallet.send(beneficiary.getSender(), { value: toNano('0.5') }, {
+                $$type: 'Claim', query_id: 704n, amount: 0n,
+            });
+
+            const res = await wallet.send(beneficiary.getSender(), { value: toNano('0.3') }, {
+                $$type: 'ResetPendingClaim', query_id: 1n,
+            });
+            expect(res.transactions).toHaveTransaction({
+                from: beneficiary.address, to: wallet.address, success: false,
+            });
+        });
+
+        it('65. Late Excesses after reset is ignored (no double-book, no destroy)', async () => {
+            const unlockAt = BigInt(blockchain.now! + 100);
+            const wallet = blockchain.openContract(
+                await LockupWallet.fromInit(
+                    705n, factory.address, jettonMaster.address,
+                    beneficiary.address, user.address, LOCK_AMOUNT, unlockAt,
+                ),
+            );
+            await wallet.send(treasury.getSender(), { value: toNano('2') }, null);
+            await wallet.send(jettonMaster.getSender(), { value: toNano('0.1') },
+                makeTakeWalletAddress(0n, fakeJettonWallet.address, wallet.address));
+            await wallet.send(fakeJettonWallet.getSender(), { value: toNano('0.1') }, {
+                $$type: 'JettonNotification',
+                query_id: 1n, amount: LOCK_AMOUNT, sender: user.address,
+                forward_payload: beginCell().endCell().asSlice(),
+            });
+            blockchain.now = Number(unlockAt) + 10;
+
+            const qid = 706n;
+            await wallet.send(beneficiary.getSender(), { value: toNano('0.5') }, {
+                $$type: 'Claim', query_id: qid, amount: 0n,
+            });
+            await wallet.send(jettonMaster.getSender(), { value: toNano('0.1') },
+                makeTakeWalletAddress(qid, fakeJettonWallet.address, beneficiary.address));
+
+            const setAt = await wallet.getPendingSetAt();
+            blockchain.now = Number(setAt) + 3601;
+
+            await wallet.send(beneficiary.getSender(), { value: toNano('0.3') }, {
+                $$type: 'ResetPendingClaim', query_id: 1n,
+            });
+
+            const resLate = await wallet.send(fakeJettonWallet.getSender(), { value: toNano('0.05') },
+                makeExcesses(qid));
+            expect(resLate.transactions).toHaveTransaction({
+                from: fakeJettonWallet.address, to: wallet.address, success: true,
+            });
+            expect(await wallet.getClaimedAmount()).toEqual(0n);
+
+            const state = await blockchain.getContract(wallet.address);
+            expect(state.balance).toBeGreaterThan(0n);
+        });
+
+        it('66. Reset by non-beneficiary -> rejected', async () => {
+            const unlockAt = BigInt(blockchain.now! + 100);
+            const wallet = blockchain.openContract(
+                await LockupWallet.fromInit(
+                    707n, factory.address, jettonMaster.address,
+                    beneficiary.address, user.address, LOCK_AMOUNT, unlockAt,
+                ),
+            );
+            await wallet.send(treasury.getSender(), { value: toNano('2') }, null);
+            await wallet.send(jettonMaster.getSender(), { value: toNano('0.1') },
+                makeTakeWalletAddress(0n, fakeJettonWallet.address, wallet.address));
+            await wallet.send(fakeJettonWallet.getSender(), { value: toNano('0.1') }, {
+                $$type: 'JettonNotification',
+                query_id: 1n, amount: LOCK_AMOUNT, sender: user.address,
+                forward_payload: beginCell().endCell().asSlice(),
+            });
+            blockchain.now = Number(unlockAt) + 10;
+
+            await wallet.send(beneficiary.getSender(), { value: toNano('0.5') }, {
+                $$type: 'Claim', query_id: 708n, amount: 0n,
+            });
+
+            const setAt = await wallet.getPendingSetAt();
+            blockchain.now = Number(setAt) + 3601;
+
+            const res = await wallet.send(attacker.getSender(), { value: toNano('0.3') }, {
+                $$type: 'ResetPendingClaim', query_id: 1n,
+            });
+            expect(res.transactions).toHaveTransaction({
+                from: attacker.address, to: wallet.address, success: false,
+            });
+        });
+
+        it('67. Reset with no pending claim -> rejected', async () => {
+            const unlockAt = BigInt(blockchain.now! + 100);
+            const wallet = blockchain.openContract(
+                await LockupWallet.fromInit(
+                    709n, factory.address, jettonMaster.address,
+                    beneficiary.address, user.address, LOCK_AMOUNT, unlockAt,
+                ),
+            );
+            await wallet.send(treasury.getSender(), { value: toNano('2') }, null);
+            await wallet.send(jettonMaster.getSender(), { value: toNano('0.1') },
+                makeTakeWalletAddress(0n, fakeJettonWallet.address, wallet.address));
+            await wallet.send(fakeJettonWallet.getSender(), { value: toNano('0.1') }, {
+                $$type: 'JettonNotification',
+                query_id: 1n, amount: LOCK_AMOUNT, sender: user.address,
+                forward_payload: beginCell().endCell().asSlice(),
+            });
+            blockchain.now = Number(unlockAt) + 10;
+
+            const res = await wallet.send(beneficiary.getSender(), { value: toNano('0.3') }, {
+                $$type: 'ResetPendingClaim', query_id: 1n,
+            });
+            expect(res.transactions).toHaveTransaction({
+                from: beneficiary.address, to: wallet.address, success: false,
+            });
         });
     });
 });
