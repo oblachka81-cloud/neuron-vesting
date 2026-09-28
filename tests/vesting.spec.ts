@@ -1394,10 +1394,16 @@ describe('NEURON Vesting — v5.1.0 (isolated + TEP-89)', () => {
 
             // Simulate bounce: send bounced<JettonTransfer> from own JW
             const bouncedBody = beginCell()
-                .storeUint(0xFFFFFFFF, 32)   // bounce prefix
-                .storeUint(0x0f8a7ea5, 32)   // original opcode (JettonTransfer)
-                .storeUint(qid, 64)
-                .endCell();
+              .storeUint(0xFFFFFFFF, 32)               // bounce prefix
+              .storeUint(0x0f8a7ea5, 32)               // original opcode
+              .storeUint(qid, 64)                      // query_id
+              .storeCoins(LOCK_AMOUNT)                 // amount
+              .storeAddress(beneficiary.address)       // destination
+              .storeAddress(wallet.address)            // response_destination
+              .storeBit(0)                             // custom_payload = null
+              .storeCoins(0n)                          // forward_ton_amount
+              .storeBit(0)                             // forward_payload Either=0
+              .endCell();
 
             await blockchain.sendMessage({
                 info: {
