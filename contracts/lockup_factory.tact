@@ -330,6 +330,7 @@ contract LockupFactory {
             return;
         }
 
+        // @misti:suppress SuboptimalCellOperation
         sc.loadUint(32);                              // op (value unused)
         let qid: Int = sc.loadUint(64);               // client-side query id
         let jm_in: Address = sc.loadAddress();        // jetton master
