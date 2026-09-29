@@ -549,10 +549,13 @@ async function refreshWhitelist() {
       const pv = x.price_usd != null ? Number(x.price_usd) : null;
       const priceTxt = pv != null && Number.isFinite(pv) ? fmtPrice(pv) : '—';
       rows.push(`<div class="lock-card">
-        <div class="lock-head">${iconTag(src, 26)} <b>${x.symbol || '?'}</b> · ${x.name || '—'}
-          <span style="margin-left:8px;font-size:11px;padding:2px 8px;border-radius:10px;background:${onchain ? '#1d4d2b' : '#6b2b2b'};color:#fff">${onchain ? 'ON-CHAIN ✓' : 'NOT ON-CHAIN'}</span>
+        <div class="lock-head" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <span style="display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;min-width:0">
+            ${iconTag(src, 26)}<b>${x.symbol || '?'}</b> · ${x.name || '—'}
+            <span style="font-size:11px;padding:2px 8px;border-radius:10px;background:${onchain ? '#1d4d2b' : '#6b2b2b'};color:#fff">${onchain ? 'ON-CHAIN ✓' : 'NOT ON-CHAIN'}</span>
+          </span>
+          <span style="margin-left:auto;font-weight:700;color:#4ade80;white-space:nowrap;font-size:13px">${priceTxt}</span>
         </div>
-        <div class="hint" style="margin-top:4px;color:#4ade80;font-weight:600">${priceTxt}</div>
         <div class="lock-foot"><code>${x.jetton_master}</code> · <a href="${EXPLORER(x.jetton_master)}" target="_blank" rel="noopener">explorer ↗</a></div>
       </div>`);
     }
