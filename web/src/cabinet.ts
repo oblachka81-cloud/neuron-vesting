@@ -5,21 +5,21 @@ import { API_URL, EXPLORER, FACTORY_ADDRESS, TONCENTER } from './config';
 // ───────────────────────────────────────────────────────────────────────────
 // NEURON Vesting — Cabinet (My Locks / Apps / Whitelist / Vaults)
 //
-// Render model (why cards no longer flicker):
+// Render model:
 //   1. Keyed reconciliation. Each lock card is ONE persistent DOM node,
-//      created once and thereafter mutated only at its inner [data-role]
-//      nodes. The list is never re-rendered wholesale via innerHTML on
-//      refresh, so there is no blank frame between polls.
-//   2. Money is DB-authoritative. claimed / available come ONLY from the
-//      indexer-backed DB (source of truth = ClaimSettled 0x128). On-chain
-//      getters are used solely for the pending/reset flag — never for an
-//      amount. This makes transient getter garbage (e.g. 0.000125782 during
-//      a claim wave) structurally impossible.
-//   3. Self-healing optimistic status. After a local claim we mark the lock
-//      "sent" and hold that until EITHER the DB moves claimed_amount for it
-//      (network confirmed) OR a TTL elapses. The optimistic state therefore
-//      never sticks and never regresses to "ready" while settlement is
-//      still propagating through the indexer.
+//      mutated only at its inner [data-role] nodes. The list is never wiped
+//      via innerHTML on refresh, so there is no blank frame between polls.
+//   2. Money AND pending state are DB-authoritative. The frontend does NOT
+//      call toncenter getters for locks at all: doing so competed with the
+//      indexer for the single free API key (429 storms) and, worse, returned
+//      stale/garbage pending flags on already-destroyed wallets (phantom
+//      "in flight" + Reset). The indexer owns settlement (ClaimSettled 0x128)
+//      and will catch up the DB within seconds once the frontend stops
+//      burning the quota. Whitelist isWalletSet is the only getter left and
+//      lives on a cold path (tab open), not the hot locks loop.
+//   3. Optimistic "sent" badge is self-healing: it shows only after a local
+//      click and clears the moment the DB moves claimed_amount for that lock
+//      or after a short TTL. No on-chain read involved.
 // ───────────────────────────────────────────────────────────────────────────
 
 type Lock = {
@@ -42,9 +42,6 @@ type EnrichedLock = Lock & {
   displayStatus: DisplayStatus;
   displayClaimed: bigint;
   displayAvailable: bigint;
-  pending: boolean;
-  pendingSetAt: bigint;
-  resettable: boolean;
   localPend: boolean;
 };
 
@@ -52,12 +49,10 @@ let currentWallet: string | null = null;
 let tcRef: TonConnectUI | null = null;
 
 const pad = (n: number) => String(n).padStart(2, '0');
-const RESET_TIMEOUT = 3600;          // seconds, mirrors the wallet constant
 const MESSAGE_VALUE = toNano('0.05');
-const LOCAL_PENDING_TTL = 20000;     // ms, safety net if settlement never lands
+const LOCAL_PENDING_TTL = 20000; // ms
 
-// Snapshot of the last fetched DB rows, keyed by lock_id. Used to read the
-// authoritative claimed_amount at click time without parsing the DOM.
+// Snapshot of the last fetched DB rows, keyed by lock_id.
 let lastLocks = new Map<string, Lock>();
 
 // lock_id -> { ts, claimedAtClick }: optimistic "I just sent it" marker.
@@ -84,7 +79,7 @@ export function mountCabinet(tc: TonConnectUI) {
   const list = document.getElementById('locks-list');
   list?.addEventListener('click', (ev) => {
     const btn = (ev.target as HTMLElement)?.closest?.(
-      '[data-claim-full],[data-claim-partial],[data-reset]',
+      '[data-claim-full],[data-claim-partial]',
     ) as HTMLElement | null;
     if (!btn) return;
     const lockId = btn.dataset.lockId!;
@@ -101,8 +96,6 @@ export function mountCabinet(tc: TonConnectUI) {
         Number(btn.dataset.decimals || 9),
         btn.dataset.available,
       );
-    } else if (btn.hasAttribute('data-reset')) {
-      onReset(lockId, wallet);
     }
   });
 
@@ -137,14 +130,7 @@ function buildClaimBody(qid: bigint, amount: bigint): Cell {
     .endCell();
 }
 
-function buildResetBody(qid: bigint): Cell {
-  return beginCell()
-    .storeUint(0x11, 32)
-    .storeUint(qid, 64)
-    .endCell();
-}
-
-// ── TON Center getter helper ─────────────────────────────────────────────
+// ── TON Center getter helper (WHITELIST ONLY — cold path) ────────────────
 
 function stackNum(e: any): bigint {
   const s = String(Array.isArray(e) ? e[1] : e);
@@ -153,14 +139,14 @@ function stackNum(e: any): bigint {
   return BigInt(s);
 }
 
-async function runGetter(address: string, method: string): Promise<bigint | null> {
+async function runGetter(address: string, method: string, stack: any[] = []): Promise<bigint | null> {
   try {
     const res = await fetch(TONCENTER, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         id: '1', jsonrpc: '2.0', method: 'runGetMethod',
-        params: { address, method, stack: [] },
+        params: { address, method, stack },
       }),
     });
     const json = await res.json();
@@ -205,44 +191,32 @@ function isLocalPending(l: Lock): boolean {
   const p = localPending.get(id);
   if (!p) return false;
   if (Date.now() - p.ts > LOCAL_PENDING_TTL) { localPending.delete(id); return false; }
-  // DB moved claimed_amount for this lock => network confirmed => drop optimism.
   if (BigInt(l.claimed_amount || '0') !== p.claimedAtClick) { localPending.delete(id); return false; }
   return true;
 }
 
-// ── Display computation (money = DB; pending = getter/optimism) ──────────
+// ── Display computation (everything from DB + local optimism; no getters) ─
 
-function computeDisplay(
-  l: Lock, known: boolean, pending: boolean, localPend: boolean, now: number,
-): DisplayStatus {
-  const amount = BigInt(l.amount);
-  const claimed = BigInt(l.claimed_amount || '0');
-  if (claimed >= amount) return 'claimed';          // final DB state wins
-  if (known && pending) return 'in_flight';         // getter confirms in-flight
-  if (localPend) return 'in_flight';                // hold optimism while indexer catches up
-  if (Number(l.unlock_at) <= now) return 'ready';
-  return 'locked';
-}
-
-function buildEnriched(
-  l: Lock, known: boolean, pending: boolean, pendingSetAt: bigint,
-): EnrichedLock {
+function buildEnriched(l: Lock): EnrichedLock {
   const now = Math.floor(Date.now() / 1000);
   const amount = BigInt(l.amount);
   const claimed = BigInt(l.claimed_amount || '0');
   const decimals = safeDecimals((l as any).decimals);
   const localPend = isLocalPending(l);
-  const ds = computeDisplay(l, known, pending, localPend, now);
-  const displayAvailable = (ds === 'in_flight' || ds === 'claimed')
+
+  let displayStatus: DisplayStatus;
+  if (claimed >= amount) displayStatus = 'claimed';      // final DB state wins
+  else if (localPend) displayStatus = 'in_flight';       // optimistic only
+  else if (Number(l.unlock_at) <= now) displayStatus = 'ready';
+  else displayStatus = 'locked';
+
+  const displayAvailable = (displayStatus === 'in_flight' || displayStatus === 'claimed')
     ? 0n
     : (amount > claimed ? amount - claimed : 0n);
-  const resettable =
-    pending && pendingSetAt > 0n && BigInt(now) >= pendingSetAt + BigInt(RESET_TIMEOUT);
 
   return {
-    ...l, decimals, displayStatus: ds,
-    displayClaimed: claimed, displayAvailable,
-    pending, pendingSetAt, resettable, localPend,
+    ...l, decimals, displayStatus,
+    displayClaimed: claimed, displayAvailable, localPend,
   };
 }
 
@@ -254,17 +228,11 @@ function renderStatusHTML(l: EnrichedLock): string {
   if (l.displayStatus === 'claimed') return '✅ received';
 
   if (l.displayStatus === 'in_flight') {
-    let s = '⏳ claim in flight';
-    if (l.resettable && isBen) {
-      s += ` <button class="btn-reset" style="margin-left:8px" data-reset data-lock-id="${l.lock_id}" data-wallet="${l.lockup_wallet}">Reset</button>`;
-    } else if (l.pendingSetAt > 0n) {
-      s += ` · reset in <span data-reset-timer="${Number(l.pendingSetAt + BigInt(RESET_TIMEOUT))}" class="timer"></span>`;
-    }
-    return s;
+    // Purely optimistic (no on-chain pending source anymore): show "sent".
+    return '⏳ transaction sent, waiting confirmation';
   }
 
   if (l.displayStatus === 'ready') {
-    if (l.localPend) return '⏳ transaction sent, waiting confirmation';
     if (!isBen) return `⏰ ready <span class="hint">(claim for beneficiary only)</span>`;
     const availText = formatTokens(l.displayAvailable, l.decimals);
     return `
@@ -301,7 +269,6 @@ function headFootHTML(l: Lock): { head: string; foot: string } {
   };
 }
 
-// Build a brand-new card node (only for locks not yet in the DOM).
 function createCard(l: EnrichedLock): HTMLElement {
   const { head, foot } = headFootHTML(l);
   const node = document.createElement('div');
@@ -315,7 +282,6 @@ function createCard(l: EnrichedLock): HTMLElement {
   return node;
 }
 
-// Mutate inner nodes of an existing card. The card itself is never replaced.
 function updateCard(node: HTMLElement, l: EnrichedLock) {
   const status = node.querySelector('[data-role="status"]');
   const progress = node.querySelector('[data-role="progress"]');
@@ -329,69 +295,36 @@ function syncList(locks: Lock[]) {
   const list = document.getElementById('locks-list');
   if (!list) return;
 
-  // ── FIX: 
-  Array.from(list.children).forEach((child) => {
-    if (!(child instanceof HTMLElement)) {
-      child.remove(); // 
-      return;
-    }
-    if (!child.hasAttribute('data-lock-id')) {
-      child.remove(); 
+  // Hard purge of any non-card leftover (stale spinner / hint / orphan
+  // buttons from an earlier render model). Keyed reconcile only tracks
+  // [data-lock-id] nodes; everything else used to survive forever.
+  Array.from(list.childNodes).forEach((c) => {
+    const el = c as HTMLElement;
+    if (!(el instanceof HTMLElement) || !el.hasAttribute?.('data-lock-id')) {
+      el.remove();
     }
   });
-  // ────────────────────────────────────────────────────────────────────────
 
   const existing = new Map<string, HTMLElement>();
   list.querySelectorAll<HTMLElement>('[data-lock-id]').forEach((n) => {
     existing.set(n.getAttribute('data-lock-id')!, n);
   });
-  
   const wanted = new Set(locks.map((l) => String(l.lock_id)));
 
   for (const [id, node] of existing) if (!wanted.has(id)) node.remove();
 
   for (const l of locks) {
     const id = String(l.lock_id);
-    const e = buildEnriched(l, /*known*/ false, /*pending*/ false, 0n);
+    const e = buildEnriched(l);
     let node = existing.get(id);
     if (!node) {
       node = createCard(e);
       list.appendChild(node);
     } else {
-      updateCard(node, e);   
-      list.appendChild(node); 
+      updateCard(node, e);
+      list.appendChild(node); // reorder without recreating content (no flicker)
     }
   }
-}
-
-// ── Background enrichment: getters only for the pending flag ─────────────
-
-async function enrichAndPatch(l: Lock) {
-  const now = Math.floor(Date.now() / 1000);
-  const amount = BigInt(l.amount);
-  const claimed = BigInt(l.claimed_amount || '0');
-
-  if (claimed >= amount) { patchFromDb(l); return; }   // closed: skip getter
-  if (Number(l.unlock_at) > now) { patchFromDb(l); return; } // still locked
-  if (!l.lockup_wallet) { patchFromDb(l); return; }
-
-  const p = await runGetter(l.lockup_wallet, 'isPendingClaim');
-  if (p !== null && p !== 0n) {
-    const ps = await runGetter(l.lockup_wallet, 'pendingSetAt');
-    patch(l, true, true, ps ?? 0n);
-  } else {
-    patch(l, true, false, 0n);
-  }
-}
-
-function patchFromDb(l: Lock) { patch(l, false, false, 0n); }
-
-function patch(l: Lock, known: boolean, pending: boolean, pendingSetAt: bigint) {
-  const list = document.getElementById('locks-list');
-  if (!list) return;
-  const node = list.querySelector<HTMLElement>(`[data-lock-id="${CSS.escape(String(l.lock_id))}"]`);
-  if (!node) return; // lock left the DOM (wallet switched) — nothing to patch
-  updateCard(node, buildEnriched(l, known, pending, pendingSetAt));
 }
 
 // ── My Locks ─────────────────────────────────────────────────────────────
@@ -421,13 +354,10 @@ async function refreshLocks() {
       return;
     }
 
-    // Cache DB rows so onClaim can read claimed_amount without DOM parsing.
     lastLocks.clear();
     for (const l of locks) lastLocks.set(String(l.lock_id), l);
 
-    syncList(locks); // instant DB skeleton, keyed, no wipe
-
-    await Promise.allSettled(locks.map((l) => enrichAndPatch(l))); // pending flag, in place
+    syncList(locks); // DB skeleton, keyed, no wipe, NO toncenter calls
   } catch (e: any) {
     if (!hasCards) list.innerHTML = `<p class="hint" style="color:#ff6b6b">Error: ${e.message}</p>`;
   } finally {
@@ -443,9 +373,9 @@ function startTimers() {
   const tick = () => {
     const now = Math.floor(Date.now() / 1000);
     let crossed = false;
-    document.querySelectorAll('[data-timer], [data-reset-timer]').forEach((el) => {
+    document.querySelectorAll('[data-timer]').forEach((el) => {
       const htmlEl = el as HTMLElement;
-      const t = Number(htmlEl.dataset.timer || htmlEl.dataset.resetTimer);
+      const t = Number(htmlEl.dataset.timer);
       const diff = t - now;
       if (diff <= 0) { htmlEl.textContent = 'ready'; crossed = true; return; }
       const d = Math.floor(diff / 86400);
@@ -463,7 +393,7 @@ function startTimers() {
   setInterval(tick, 1000);
 }
 
-// ── Claim / Reset ────────────────────────────────────────────────────────
+// ── Claim ────────────────────────────────────────────────────────────────
 
 async function sendWalletMessage(wallet: string, body: Cell): Promise<boolean> {
   if (!tcRef || !currentWallet) return false;
@@ -480,7 +410,6 @@ async function sendWalletMessage(wallet: string, body: Cell): Promise<boolean> {
   }
 }
 
-// Flip the status node to "waiting" instantly, without a full refresh.
 function applyWaiting(lockId: string) {
   const list = document.getElementById('locks-list');
   if (!list) return;
@@ -521,16 +450,6 @@ async function onClaim(
   const ok = await sendWalletMessage(wallet, buildClaimBody(qid, amount));
   if (!ok) { localPending.delete(lockId); refreshLocks(); return; }
 
-  setTimeout(refreshLocks, 5000);
-  setTimeout(refreshLocks, 15000);
-}
-
-async function onReset(lockId: string, wallet: string) {
-  if (!tcRef || !currentWallet) return;
-  armOptimistic(lockId);
-  const qid = makeQid();
-  const ok = await sendWalletMessage(wallet, buildResetBody(qid));
-  if (!ok) { localPending.delete(lockId); refreshLocks(); return; }
   setTimeout(refreshLocks, 5000);
   setTimeout(refreshLocks, 15000);
 }
@@ -586,14 +505,13 @@ async function onAppSubmit(e: Event) {
   } catch (e: any) { statusEl.textContent = '❌ ' + e.message; statusEl.className = 'status err'; }
 }
 
-// ── Icons + whitelist ────────────────────────────────────────────────────
+// ── Icons + whitelist (cold path — the only toncenter getter left) ───────
 
 async function jettonIcon(master: string): Promise<string | null> {
   try { const r = await fetch(`${API_URL}/api/jetton/${encodeURIComponent(master)}/icon`); if (!r.ok) return null; const j = await r.json(); return j.image || null; }
   catch { return null; }
 }
 
-// no-referrer: postimg/cdn often strip hotlinks by Referer header.
 function iconTag(src: string | null, size: number): string {
   if (!src) return `<span style="display:inline-block;width:${size}px;height:${size}px;border-radius:50%;background:#333;margin-right:6px;vertical-align:middle"></span>`;
   return `<img src="${src}" width="${size}" height="${size}" alt="" referrerpolicy="no-referrer"
@@ -604,10 +522,8 @@ function iconTag(src: string | null, size: number): string {
 async function isWhitelistedOnchain(master: string): Promise<boolean> {
   try {
     const cell = beginCell().storeAddress(Address.parse(master)).endCell();
-    const res = await fetch(TONCENTER, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: '1', jsonrpc: '2.0', method: 'runGetMethod', params: { address: FACTORY_ADDRESS, method: 'isWalletSet', stack: [['tvm.Slice', cell.toBoc().toString('base64')]] } }) });
-    const json = await res.json();
-    if (!json.ok) return false;
-    return stackNum(json.result.stack[0]) !== 0n;
+    const v = await runGetter(FACTORY_ADDRESS, 'isWalletSet', [['tvm.Slice', cell.toBoc().toString('base64')]]);
+    return v !== null && v !== 0n;
   } catch { return false; }
 }
 
@@ -633,7 +549,7 @@ async function refreshWhitelist() {
   } catch (e: any) { list.innerHTML = `<p class="hint" style="color:#ff6b6b">Error: ${e.message}</p>`; }
 }
 
-// ── Vaults ─────────────────────────────────────────────────────────────
+// ── Vaults ────────────────────────────────────────────────────────────
 
 function formatUSD(n: number): string {
   if (n >= 1e9) return `$${(n / 1e9).toFixed(2)}B`;
