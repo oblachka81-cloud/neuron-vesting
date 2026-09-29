@@ -1,4 +1,4 @@
-// bot/api.js — REST API: locks, whitelist, applications, admin, jetton icons/meta (v5.1.1)
+// bot/api.js — REST API: locks, whitelist, applications, admin, jetton icons/meta/prices (v5.1.1)
 const db = require('./db');
 const auth = require('./auth');
 const { Cell, Address, beginCell } = require('@ton/core');
@@ -74,39 +74,131 @@ async function fetchJettonMeta(master) {
 
 // Monotonic treasury query_id. Date.now() alone collides on two calls in the
 // same millisecond -> second multisig order refused by used_qids ("qid reused").
-// Cross-process collision with the frontend in the same wall-clock ms is ~0 and
-// benign (one order refused, no funds lost); intra-process is the real risk.
 let _qidSeq = 0;
 function nextQid() {
   return BigInt(Date.now()) * 1000n + BigInt(_qidSeq++);
 }
 
-// ===== Price Cache (update every 5 mins) =====
-// NOTE: hardcoded to COGNIQ on purpose for now. Universal per-jetton pricing is
-// a separate track and must land together with the frontend Vaults renderer that
-// consumes per-jetton price. Do not "fix" here in isolation.
-let priceCache = { price: 0.001286, updated: 0 };
+// ===== Per-jetton price resolver (GeckoTerminal -> STON.fi -> null) =====
+// GT is PRIMARY: it aggregates pools across all indexed DEX (STON.fi, DeDust,
+// ...), so it covers tokens STON alone never sees. STON is the cheap backup
+// (one batch call, no rate limit) and an independent second opinion. No
+// liquidity gate, no phantom default: vesting is not a trading venue, the
+// price is only a display multiplier. If neither source quotes a token we
+// return null and the UI shows "—" rather than a fake number.
+const COGNIQ_MASTER = 'EQDOjRZ5rbSnBBvhsv4g0JNN67p89617_2pNc_AO1dTEkaNg';
+const PRICE_TTL = 300000; // 5 min
+const priceCache = new Map(); // master -> { usd, source, t }
 
-async function getCogniqPrice() {
-  const now = Date.now();
-  if (now - priceCache.updated < 300000) return priceCache.price;
+function normBounceable(master) {
+  try { return Address.parse(master).toString({ urlSafe: true, bounceable: true }); }
+  catch { return master; }
+}
+function normRaw(master) {
+  try { return Address.parse(master).toRawString(); }
+  catch { return master; }
+}
 
+// GT per master: prefer the most liquid pool's price for our token (base or
+// quote). Falls back to the flat token attribute. Returns null if unresolvable
+// (then STON picks it up). Field shapes are defensive so a GT schema change
+// degrades to null instead of throwing.
+async function gtPrice(master) {
+  const raw = normRaw(master);
+  const bounce = normBounceable(master);
+
+  // (a) pools endpoint -> best pool -> base/quote price in USD
+  try {
+    const r = await fetch(
+      `https://api.geckoterminal.com/api/v2/networks/ton/tokens/${encodeURIComponent(bounce)}/pools`,
+    );
+    if (r.ok) {
+      const j = await r.json();
+      const pools = (j && j.data) || [];
+      let best = null;
+      let bestReserve = -1;
+      for (const p of pools) {
+        const a = p.attributes || {};
+        const res = parseFloat(a.reserve_in_usd);
+        if (Number.isFinite(res) && res > bestReserve) { bestReserve = res; best = p; }
+      }
+      if (best) {
+        const a = best.attributes || {};
+        const rel = best.relationships || {};
+        const baseId = (rel.base_token && rel.base_token.data && rel.base_token.data.id) || '';
+        const quoteId = (rel.quote_token && rel.quote_token.data && rel.quote_token.data.id) || '';
+        const isBase = baseId.includes(raw) || baseId.includes(bounce);
+        const isQuote = quoteId.includes(raw) || quoteId.includes(bounce);
+        const cand = isBase ? a.base_token_price_usd : isQuote ? a.quote_token_price_usd : null;
+        const n = cand != null ? parseFloat(cand) : null;
+        if (n != null && Number.isFinite(n) && n > 0) return { usd: n, source: 'gt' };
+      }
+    }
+  } catch (_) {}
+
+  // (b) flat token attribute, if GT exposes it
+  try {
+    const r = await fetch(
+      `https://api.geckoterminal.com/api/v2/networks/ton/tokens/${encodeURIComponent(bounce)}`,
+    );
+    if (r.ok) {
+      const j = await r.json();
+      const p = j && j.data && j.data.attributes && j.data.attributes.price_usd;
+      const n = p != null ? parseFloat(p) : null;
+      if (n != null && Number.isFinite(n) && n > 0) return { usd: n, source: 'gt' };
+    }
+  } catch (_) {}
+
+  return null;
+}
+
+// One STON.fi call, mapped onto every master still missing a price.
+async function stonPrices(masters) {
+  const out = new Map();
+  if (masters.length === 0) return out;
   try {
     const res = await fetch('https://api.ston.fi/v1/assets');
     const data = await res.json();
+    const list = data.asset_list || [];
+    const byAddr = new Map();
+    for (const a of list) if (a.contract_address) byAddr.set(a.contract_address, a);
 
-    const asset = data.asset_list.find(
-      (a) => a.contract_address === 'EQDOjRZ5rbSnBBvhsv4g0JNN67p89617_2pNc_AO1dTEkaNg',
-    );
-
-    if (asset && asset.dex_price_usd) {
-      priceCache = { price: parseFloat(asset.dex_price_usd), updated: now };
+    for (const m of masters) {
+      const a = byAddr.get(normBounceable(m)) || byAddr.get(m);
+      const p = a && a.dex_price_usd != null ? parseFloat(a.dex_price_usd) : null;
+      if (p != null && Number.isFinite(p) && p > 0) out.set(m, { usd: p, source: 'ston' });
     }
   } catch (e) {
-    console.warn('STON.fi price fetch failed, using cache', e);
+    console.warn('STON.fi price fetch failed', e.message);
+  }
+  return out;
+}
+
+async function getPrices(masters) {
+  const now = Date.now();
+  const out = new Map();
+  const need = [];
+
+  for (const m of masters) {
+    const c = priceCache.get(m);
+    if (c && now - c.t < PRICE_TTL) out.set(m, { usd: c.usd, source: c.source });
+    else need.push(m);
   }
 
-  return priceCache.price;
+  if (need.length) {
+    // GT primary, throttled to avoid burning the free-tier 30/min on warm-up.
+    const gt = await mapLimit(need, 2, async (m) => [m, await gtPrice(m)]);
+    const gtMap = new Map(gt);
+    const missing = need.filter((m) => !gtMap.get(m));
+    const ston = await stonPrices(missing); // cheap batch backup
+
+    for (const m of need) {
+      const rec = gtMap.get(m) || ston.get(m) || { usd: null, source: null };
+      priceCache.set(m, { ...rec, t: now });
+      out.set(m, rec);
+    }
+  }
+  return out;
 }
 
 // ===== jetton icon resolver =====
@@ -185,8 +277,6 @@ function json(res, code, body) {
 }
 
 // Per-field length caps for untrusted public input (DoS / DB bloat guard).
-// These are NOT a substitute for column limits in db.js — exact schema bounds
-// live there; this only rejects absurdly large payloads before they reach SQL.
 const LIMITS = {
   applicant_name: 120,
   project_url: 512,
@@ -274,8 +364,30 @@ async function addRoutes(req, res) {
   if (path === '/api/locks/public' && req.method === 'GET') {
     try {
       const summary = await db.getPublicVaultsSummary();
-      const price = await getCogniqPrice();
-      return json(res, 200, { summary, price_usd: price });
+      const masters = uniqueStrings((summary?.by_jetton || []).map((x) => x.jetton_master));
+
+      const priceMap = await getPrices(masters);
+      const metaMap = new Map();
+      await Promise.all(masters.map(async (m) => metaMap.set(m, await fetchJettonMeta(m))));
+
+      const prices = {};
+      for (const m of masters) {
+        const pr = priceMap.get(m) || { usd: null, source: null };
+        const md = metaMap.get(m);
+        prices[m] = {
+          usd: pr.usd,
+          source: pr.source,
+          decimals: safeDecimals(md?.decimals),
+        };
+      }
+
+      // price_usd kept for backward compat with the old cabinet during the
+      // deploy window; the new cabinet reads `prices` and this scalar can go.
+      return json(res, 200, {
+        summary,
+        prices,
+        price_usd: prices[COGNIQ_MASTER]?.usd ?? null,
+      });
     } catch (e) {
       return json(res, 500, { error: e.message });
     }
@@ -436,7 +548,6 @@ async function addRoutes(req, res) {
       }
 
       // Resolve jetton metadata (symbol / name) from TonAPI if not given.
-      // Cache 1h to avoid hammering the API on repeated approvals.
       let symbol = body.symbol || null;
       let name = body.name || null;
 
@@ -465,7 +576,6 @@ async function addRoutes(req, res) {
       });
 
       // 2. Prepare on-chain SetJettonWallet body for multisig.
-      // FACTORY_ADDRESS is mandatory now. Old hardcoded factory fallback removed.
       const factoryStr = process.env.FACTORY_ADDRESS;
       if (!factoryStr) {
         return json(res, 500, { error: 'FACTORY_ADDRESS not configured' });
@@ -501,7 +611,6 @@ async function addRoutes(req, res) {
           factory_jetton_wallet: factoryJW.toString(),
           body_base64: txBody.toBoc().toString('base64'),
         },
-        // Echo resolved metadata back to the UI (useful for debug + display)
         resolved: { symbol, name },
       });
     } catch (e) {
