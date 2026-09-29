@@ -329,10 +329,23 @@ function syncList(locks: Lock[]) {
   const list = document.getElementById('locks-list');
   if (!list) return;
 
+  // ── FIX: 
+  Array.from(list.children).forEach((child) => {
+    if (!(child instanceof HTMLElement)) {
+      child.remove(); // 
+      return;
+    }
+    if (!child.hasAttribute('data-lock-id')) {
+      child.remove(); 
+    }
+  });
+  // ────────────────────────────────────────────────────────────────────────
+
   const existing = new Map<string, HTMLElement>();
   list.querySelectorAll<HTMLElement>('[data-lock-id]').forEach((n) => {
     existing.set(n.getAttribute('data-lock-id')!, n);
   });
+  
   const wanted = new Set(locks.map((l) => String(l.lock_id)));
 
   for (const [id, node] of existing) if (!wanted.has(id)) node.remove();
@@ -345,8 +358,8 @@ function syncList(locks: Lock[]) {
       node = createCard(e);
       list.appendChild(node);
     } else {
-      updateCard(node, e);   // refresh status/progress from latest DB row
-      list.appendChild(node); // reorder without recreating content (no flicker)
+      updateCard(node, e);   
+      list.appendChild(node); 
     }
   }
 }
