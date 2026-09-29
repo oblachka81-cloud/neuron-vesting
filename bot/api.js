@@ -413,7 +413,20 @@ async function addRoutes(req, res) {
 
   if (path === '/api/whitelist' && req.method === 'GET') {
     try {
-      return json(res, 200, { whitelist: await db.listWhitelist() });
+      const wl = await db.listWhitelist();
+      const masters = uniqueStrings(wl.map((x) => x.jetton_master));
+      const priceMap = await getPrices(masters);
+      const metaMap = new Map();
+      await Promise.all(masters.map(async (m) => metaMap.set(m, await fetchJettonMeta(m))));
+
+      const out = wl.map((x) => {
+        const m = String(x.jetton_master);
+        const p = priceMap.get(m) || { usd: null, source: null };
+        const md = metaMap.get(m);
+        return { ...x, price_usd: p.usd, price_source: p.source, decimals: safeDecimals(md?.decimals) };
+      });
+
+      return json(res, 200, { whitelist: out });
     } catch (e) {
       return json(res, 500, { error: e.message });
     }
