@@ -20,6 +20,14 @@ import { API_URL, EXPLORER, FACTORY_ADDRESS, TONCENTER } from './config';
 //   3. Optimistic "sent" badge is self-healing: it shows only after a local
 //      click and clears the moment the DB moves claimed_amount for that lock
 //      or after a short TTL. No on-chain read involved.
+//
+// Vaults pricing (this revision):
+//   - Per-token. USD = SUM over jettons of (tvl_nano / 10^decimals * price).
+//     decimals come from the backend price map (TonAPI-resolved), NOT a
+//     hardcoded 1e9. price comes from GeckoTerminal-first (STON backup) and
+//     may be null -> that token contributes 0 to USD and shows "—". No
+//     phantom default, no liquidity gate: vesting is not a trading venue,
+//     the price is only a display multiplier.
 // ───────────────────────────────────────────────────────────────────────────
 
 type Lock = {
@@ -549,7 +557,7 @@ async function refreshWhitelist() {
   } catch (e: any) { list.innerHTML = `<p class="hint" style="color:#ff6b6b">Error: ${e.message}</p>`; }
 }
 
-// ── Vaults ────────────────────────────────────────────────────────────
+// ── Vaults ───────────────────────────────────────────────────────────
 
 function formatUSD(n: number): string {
   if (n >= 1e9) return `$${(n / 1e9).toFixed(2)}B`;
@@ -558,8 +566,15 @@ function formatUSD(n: number): string {
   return `$${n.toFixed(2)}`;
 }
 
-function formatCoins(nano: bigint | string): string {
-  return (BigInt(nano) / 10n ** 9n).toLocaleString('en-US');
+// Token units with REAL decimals (was hardcoded /1e9 -> lied for 6/18-dec tokens).
+function formatCoins(nano: bigint | string, decimals: number): string {
+  return formatTokens(BigInt(nano), decimals);
+}
+
+// Adaptive USD precision: tiny prices (COGNIQ ~0.0013) need more digits.
+function fmtPrice(usd: number): string {
+  const d = usd > 0 && usd < 0.0001 ? 8 : usd < 0.01 ? 6 : 4;
+  return '$' + usd.toFixed(d);
 }
 
 async function refreshVaults() {
@@ -568,26 +583,65 @@ async function refreshVaults() {
   if (!summaryEl || !jettonsEl) return;
   try {
     const r = await fetch(`${API_URL}/api/locks/public`); const j = await r.json();
-    const totalTVL_nano = BigInt(j.summary?.total?.total_tvl_nano ?? 0);
-    const totalTVL_coins = Number(totalTVL_nano / 10n ** 9n);
-    const price = Number(j.price_usd || 0);
-    const totalTVL_usd = totalTVL_coins * price;
-    const totalLocks = j.summary?.total?.total_locks ?? 0;
+    const summary = j.summary || {};
+    const prices = j.prices || {}; // master -> { usd, source, decimals }
+    const byJetton = summary.by_jetton || [];
+    const totalLocks = summary.total?.total_locks ?? 0;
     const hasLocks = totalLocks > 0;
+
+    // Per-token USD aggregation. A token with null price contributes 0 to USD
+    // (shown as "—") but its units still count. No phantom default.
+    let usdSum = 0;
+    let usdKnown = false;
+    const priced: number[] = [];
+    for (const x of byJetton) {
+      const m = String(x.jetton_master);
+      const p = prices[m] || {};
+      const dec = safeDecimals(p.decimals);
+      const units = Number(BigInt(x.tvl_nano ?? 0) / (10n ** BigInt(dec))); // approx, display-only
+      if (p.usd != null && Number.isFinite(p.usd)) {
+        usdSum += units * p.usd;
+        usdKnown = true;
+        priced.push(p.usd);
+      }
+    }
+
+    // Header "Price": meaningful only when exactly one jetton is locked;
+    // across several tokens a single scalar would lie -> "—".
+    const headerPrice = priced.length === 1 ? fmtPrice(priced[0]) : '—';
+
+    // Header sub-line: units only make sense for a single token (summing nano
+    // across differing decimals is meaningless) -> otherwise "across N jettons".
+    const totalNano = BigInt(summary.total?.total_tvl_nano ?? 0);
+    let subLine: string;
+    if (!hasLocks) subLine = 'no active locks';
+    else if (byJetton.length === 1) {
+      const p = prices[String(byJetton[0].jetton_master)] || {};
+      subLine = formatCoins(totalNano, safeDecimals(p.decimals)) + ' tokens';
+    } else subLine = `across ${byJetton.length} jettons`;
+
+    const tvlUsdText = !hasLocks ? '—' : usdKnown ? formatUSD(usdSum) : '—';
+
     summaryEl.innerHTML = `
       <div class="vault-stats">
-        <div class="stat-box"><div class="stat-label">Total Value Locked</div><div class="stat-value">${hasLocks ? formatUSD(totalTVL_usd) : '—'}</div><div class="stat-sub">${hasLocks ? formatCoins(totalTVL_nano) + ' tokens' : 'no active locks'}</div></div>
+        <div class="stat-box"><div class="stat-label">Total Value Locked</div><div class="stat-value">${tvlUsdText}</div><div class="stat-sub">${subLine}</div></div>
         <div class="stat-box"><div class="stat-label">Active Locks</div><div class="stat-value">${totalLocks}</div></div>
-        <div class="stat-box"><div class="stat-label">Price</div><div class="stat-value">${hasLocks && price > 0 ? '$' + price.toFixed(6) : '—'}</div></div>
+        <div class="stat-box"><div class="stat-label">Price</div><div class="stat-value">${hasLocks ? headerPrice : '—'}</div></div>
       </div>`;
-    const byJetton = j.summary?.by_jetton || [];
+
     if (byJetton.length === 0) { jettonsEl.innerHTML = '<p class="hint">No active locks yet</p>'; return; }
     const rows: string[] = [];
     for (const x of byJetton) {
-      const master = String(x.jetton_master); const iconSrc = await jettonIcon(master);
+      const master = String(x.jetton_master);
+      const p = prices[master] || {};
+      const dec = safeDecimals(p.decimals);
+      const iconSrc = await jettonIcon(master);
+      const priceTxt = p.usd != null && Number.isFinite(p.usd) ? fmtPrice(p.usd) : '—';
       rows.push(`<div class="jetton-row" style="cursor:pointer" data-master="${master.replace(/"/g, '')}">
         ${iconTag(iconSrc, 24)} <span class="jetton-addr">${master.slice(0, 6)}...${master.slice(-4)}</span>
-        <span class="jetton-tvl">${formatCoins(x.tvl_nano)}</span> <span class="jetton-count">${x.locks} locks</span></div>`);
+        <span class="jetton-tvl">${formatCoins(x.tvl_nano ?? 0, dec)}</span>
+        <span class="jetton-price" style="margin-left:auto;color:#4ade80">${priceTxt}</span>
+        <span class="jetton-count">${x.locks} locks</span></div>`);
     }
     jettonsEl.innerHTML = rows.join('');
     jettonsEl.querySelectorAll<HTMLElement>('[data-master]').forEach((el) => { el.onclick = () => showJettonDetails(el.dataset.master!); });
