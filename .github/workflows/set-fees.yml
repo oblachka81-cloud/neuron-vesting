@@ -1,0 +1,33 @@
+name: Set Fees (generate treasury body)
+on:
+  workflow_dispatch:
+    inputs:
+      bps:
+        description: 'Jetton fee in basis points (0..1000). Leave empty to skip.'
+        required: false
+        type: string
+      ton:
+        description: 'Fixed TON fee per lock (e.g. 0.1 or 1). Leave empty to skip.'
+        required: false
+        type: string
+jobs:
+  gen:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+      - name: Generate SetFeeBps body
+        if: ${{ inputs.bps != '' }}
+        env:
+          BPS: ${{ inputs.bps }}
+          FACTORY_ADDRESS: EQD_dSnLqcBiQyT2LRyNPIUpqAY9Qr9VoMgUCKtHN5xpSCTN
+        run: npx tsx scripts/set-fees.ts
+      - name: Generate SetFeeTon body
+        if: ${{ inputs.ton != '' }}
+        env:
+          TON: ${{ inputs.ton }}
+          FACTORY_ADDRESS: EQD_dSnLqcBiQyT2LRyNPIUpqAY9Qr9VoMgUCKtHN5xpSCTN
+        run: npx tsx scripts/set-fees.ts
