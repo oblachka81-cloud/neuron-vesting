@@ -286,7 +286,20 @@ async function pollHotOne() {
   const entries = [...hot.entries()];
   if (entries.length === 0) return;
   const [wallet, meta] = entries[0];
-  if (Date.now() - meta.ts > HOT_TTL_MS) { hot.delete(wallet); return; }
+
+  if (Date.now() - meta.ts > HOT_TTL_MS) {
+    // Same fallback as pollWalletsOne, but for wallets stuck in the hot window.
+    try {
+      const st = await limiter.call(() => client.getContractState(Address.parse(wallet)));
+      if (st.ok && st.data && (st.data.state === 'nonexistent' || st.data.state === 'uninitialized')) {
+        console.log('Hot TTL expired, wallet destroyed -> auto-close lock #' + meta.lock_id);
+        await db.markClaimed(meta.lock_id, null);
+      }
+    } catch (e) {}
+    hot.delete(wallet);
+    return;
+  }
+
   const r = await limiter.call(() => client.getTransactions(Address.parse(wallet), { limit: 50 }));
   if (!r.ok) return;
   await handleWalletEvents(wallet, r.data);
