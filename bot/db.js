@@ -169,9 +169,18 @@ async function insertLock(l) {
 }
 
 async function markClaimed(lockId, amount) {
+  // amount === null means: wallet was destroyed -> full claim happened.
+  // In v5.1.1 self-destruct only runs after a successful settlement.
+  if (amount === null || amount === undefined) {
+    await sql`
+      UPDATE locks
+      SET claimed_amount = amount
+      WHERE lock_id = ${String(lockId)} AND claimed_amount < amount`;
+    return;
+  }
   await sql`
     UPDATE locks
-    SET claimed_amount = claimed_amount + ${String(amount)}
+    SET claimed_amount = LEAST(claimed_amount + ${String(amount)}, amount)
     WHERE lock_id = ${String(lockId)}`;
 }
 
