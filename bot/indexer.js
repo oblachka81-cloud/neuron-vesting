@@ -265,6 +265,18 @@ async function pollWalletsOne() {
   const lock = locks[rr];
   rr = (rr + 1) % locks.length;
   if (!lock.lockup_wallet) return;
+
+  // Fallback: 0x128 can be lost if the wallet self-destructs before we read
+  // its history (429, timing). A destroyed wallet == successful full claim.
+  try {
+    const st = await limiter.call(() => client.getContractState(Address.parse(lock.lockup_wallet)));
+    if (st.ok && st.data && (st.data.state === 'nonexistent' || st.data.state === 'uninitialized')) {
+      console.log('Wallet destroyed -> auto-close lock #' + lock.lock_id);
+      await db.markClaimed(lock.lock_id, null);
+      return;
+    }
+  } catch (e) {}
+
   const r = await limiter.call(() => client.getTransactions(Address.parse(lock.lockup_wallet), { limit: 50 }));
   if (!r.ok) return;
   await handleWalletEvents(lock.lockup_wallet, r.data);
