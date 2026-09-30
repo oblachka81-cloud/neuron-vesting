@@ -126,7 +126,7 @@ const eventKey = (addr, lt, type) => addr + ':' + lt + ':' + type;
 // ClaimSettled comes in the same tx as destroy -> wallet dies instantly and
 // v2 stops returning its history. So once a dispatch (0x125) is seen on a live
 // wallet, poll that wallet every tick until 0x128 lands.
-const HOT_TTL_MS = 15000;
+const HOT_TTL_MS = 60000;
 const hot = new Map();
 
 async function handleWalletEvents(wallet, txs) {
