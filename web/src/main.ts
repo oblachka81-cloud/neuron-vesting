@@ -31,5 +31,5 @@ document.querySelectorAll('[data-tab]').forEach((btn) => {
 
 // ===== Ecosystem button → opens main NEURON Mini App =====
 document.getElementById('btnEcosystem')?.addEventListener('click', () => {
-  window.open('https://t.me/NeuronEcosystemBot/app', '_blank');
+  window.open('https://t.me/NeuronEcosystemBot?startapp=', '_blank');
 });
