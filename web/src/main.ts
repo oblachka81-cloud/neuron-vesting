@@ -28,3 +28,8 @@ document.querySelectorAll('[data-tab]').forEach((btn) => {
     if (tab === 'vaults') (window as any).__nv.refreshVaults(); // <-- ДОБАВИЛИ ЭТУ СТРОКУ
   });
 });
+
+// ===== Ecosystem button → opens main NEURON Mini App =====
+document.getElementById('btnEcosystem')?.addEventListener('click', () => {
+  window.open('https://t.me/NeuronEcosystemBot/app', '_blank');
+});
