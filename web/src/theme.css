@@ -429,3 +429,50 @@ body.ru #vaults-jettons::before { content: 'Нажми на строку — о�
   .jetton-row .jetton-count { font-size: 10px; padding: 3px 8px; }
   #vaults-jettons::before { font-size: 9.5px; }
 }
+
+/* ═══════════════════════════════════════════════════════════════ */
+/* Internal scroll for #locks-list — same pattern as .locks-detail-list */
+/* Fixes Telegram WebApp not scrolling long lock lists              */
+/* ═══════════════════════════════════════════════════════════════ */
+
+#locks-list {
+  max-height: 68vh;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding-right: 6px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(202, 166, 78, 0.35) transparent;
+}
+
+/* Optional — nicer scrollbar in WebKit (Chrome, Telegram WebView) */
+#locks-list::-webkit-scrollbar {
+  width: 6px;
+}
+#locks-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+#locks-list::-webkit-scrollbar-thumb {
+  background: rgba(202, 166, 78, 0.35);
+  border-radius: 3px;
+}
+#locks-list::-webkit-scrollbar-thumb:hover {
+  background: rgba(202, 166, 78, 0.55);
+}
+
+/* Same pattern for other long lists inside cards */
+#apps-list, #whitelist-list {
+  max-height: 68vh;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding-right: 6px;
+}
+
+/* Vaults top-jettons list can also grow — enable scroll */
+#vaults-jettons {
+  max-height: 50vh;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding-right: 6px;
+}
+
+
