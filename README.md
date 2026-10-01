@@ -5,14 +5,14 @@
 
 [Mini app (live)](https://oblachka81-cloud.github.io/neuron-vesting) · [Telegram bot](https://t.me/NeuronEcosystemBot) · [Whitepaper v4.0](https://neuron.bothost.tech/whitepaper.html) · [Spec](docs/SPEC.md) · [Security](SECURITY.md)
 
-![Locks](https://img.shields.io/badge/live%20lockups-11-gold)
-![Locked](https://img.shields.io/badge/locked-2B%20COGNIQ%20(40%25)-gold)
-![Mainnet TON](https://img.shields.io/badge/network-TON%20Mainnet-0098EA)
-![Tact 1.6.13](https://img.shields.io/badge/language-Tact%201.6.13-8a2be2)
-![Tests 70/70](https://img.shields.io/badge/tests-70%2F70%20passing-brightgreen)
-![Misti clean](https://img.shields.io/badge/Misti-no%20errors%20(42%20detectors)-brightgreen)
-![TON Dev Skills](https://img.shields.io/badge/TON%20Dev%20Skills-0%20critical%2Fhigh-yellow)
-![License MIT](https://img.shields.io/badge/license-MIT-blue)
+[![Locks](https://img.shields.io/badge/live%20lockups-11-gold)](#-neuron-vesting--live-on-mainnet)
+[![Locked](https://img.shields.io/badge/locked-2B%20COGNIQ%20(40%25)-gold)](#-neuron-vesting--live-on-mainnet)
+[![Mainnet TON](https://img.shields.io/badge/network-TON%20Mainnet-0098EA)](https://tonviewer.com/EQD_dSnLqcBiQyT2LRyNPIUpqAY9Qr9VoMgUCKtHN5xpSCTN)
+[![Tact 1.6.13](https://img.shields.io/badge/language-Tact%201.6.13-8a2be2)](https://tact-lang.org/)
+[![Tests 70/70](https://img.shields.io/badge/tests-70%2F70%20passing-brightgreen)](#-verification)
+[![Misti clean](https://img.shields.io/badge/Misti-no%20errors%20(42%20detectors)-brightgreen)](docs/audit/misti-report.txt)
+[![TON Dev Skills](https://img.shields.io/badge/TON%20Dev%20Skills-0%20critical%2Fhigh-yellow)](docs/audit/ton-dev-skills-audit.txt)
+[![License MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 ---
 
