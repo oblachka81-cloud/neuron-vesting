@@ -31,7 +31,7 @@ document.querySelectorAll('[data-tab]').forEach((btn) => {
 
 // ===== Ecosystem button → opens main NEURON Mini App =====
 document.getElementById('btnEcosystem')?.addEventListener('click', () => {
-  const url = 'https://t.me/NeuronEcosystemBot?startapp=neuron';
+  const url = 'https://t.me/NeuronEcosystemBot?startapp=';
   const tg = (window as any).Telegram?.WebApp;
   if (tg?.openTelegramLink) {
     tg.openTelegramLink(url);   // нативный метод для t.me-ссылок
