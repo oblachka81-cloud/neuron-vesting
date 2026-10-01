@@ -475,4 +475,61 @@ body.ru #vaults-jettons::before { content: 'Нажми на строку — о�
   padding-right: 6px;
 }
 
+/* ═══════════════════════════════════════════════════════════════ */
+/* Ecosystem back-link — same style as Vesting button in NEURON    */
+/* ═══════════════════════════════════════════════════════════════ */
+
+.tabs-row2 {
+  display: flex;
+  gap: 8px;
+  padding: 0 14px;
+  margin-bottom: 18px;
+}
+
+.tabs-row2 .tab-btn {
+  flex: 1;
+}
+
+.tabs-row2 .tab-ecosystem {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  font-family: 'Marcellus', serif;
+  font-size: 14px;
+  letter-spacing: 0.06em;
+  text-decoration: none;
+  color: #f5e3b0;
+  background: linear-gradient(180deg,
+    rgba(202, 166, 78, 0.16),
+    rgba(202, 166, 78, 0.06));
+  border: 1px solid rgba(202, 166, 78, 0.55);
+  text-shadow: 0 0 8px rgba(255, 220, 140, 0.35);
+  box-shadow: 0 0 12px rgba(202, 166, 78, 0.15);
+  transition: all 0.2s ease;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.tabs-row2 .tab-ecosystem:hover,
+.tabs-row2 .tab-ecosystem:active {
+  background: linear-gradient(180deg,
+    rgba(202, 166, 78, 0.28),
+    rgba(202, 166, 78, 0.14));
+  border-color: rgba(202, 166, 78, 0.85);
+  box-shadow: 0 0 20px rgba(202, 166, 78, 0.35);
+  color: #fff6d8;
+}
+
+@media (max-width: 520px) {
+  .tabs-row2 .tab-ecosystem {
+    font-size: 12px;
+    padding: 9px 10px;
+    letter-spacing: 0.04em;
+  }
+}
+
 
