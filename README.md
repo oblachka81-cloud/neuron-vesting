@@ -5,6 +5,8 @@
 
 [Mini app (live)](https://oblachka81-cloud.github.io/neuron-vesting) · [Telegram bot](https://t.me/NeuronEcosystemBot) · [Whitepaper v4.0](https://neuron.bothost.tech/whitepaper.html) · [Spec](docs/SPEC.md) · [Security](SECURITY.md)
 
+![Locks](https://img.shields.io/badge/live%20lockups-11-gold)
+![Locked](https://img.shields.io/badge/locked-2B%20COGNIQ%20(40%25)-gold)
 ![Mainnet TON](https://img.shields.io/badge/network-TON%20Mainnet-0098EA)
 ![Tact 1.6.13](https://img.shields.io/badge/language-Tact%201.6.13-8a2be2)
 ![Tests 70/70](https://img.shields.io/badge/tests-70%2F70%20passing-brightgreen)
@@ -24,6 +26,7 @@
 
 ## ✨ Why NEURON Vesting
 
+- **Production-proven** — 11 live lockups on TON mainnet. **2 000 000 000 COGNIQ (40% of total supply of the NEURON ecosystem)** locked on-chain via this exact module. See [🔒 NEURON vesting — live on mainnet](#-neuron-vesting--live-on-mainnet).
 - **Non-custodial** — neither the factory, the creator, nor the platform can pull locked jettons out of a funded wallet.
 - **Immutable schedule** — the beneficiary can claim only after `unlock_at`. The unlock date is fixed at creation and cannot be changed on-chain.
 - **Settlement-only accounting** — a payout is booked only when the transfer is confirmed on-chain (`ClaimSettled`). A dispatch alone never counts as paid, so balances stay honest under any failure mode.
@@ -52,7 +55,62 @@
 | Telegram bot | `@NeuronEcosystemBot` |
 | Whitepaper | `neuron.bothost.tech/whitepaper.html` |
 
+### Fee configuration
+
+Platform fees are **live contract parameters** on the LockupFactory, retunable by the treasury multisig via `SetFeeBps` / `SetFeeTon` — no redeploy required.
+
+| Parameter | Value | Meaning |
+|---|---|---|
+| `fee_bps` | **50** | 0.5% jetton cut on every new lock |
+| `fee_ton` | **1 TON** | Fixed platform fee in TON per new lock |
+
+These standard fees apply to **all locks created after the NEURON launch campaign**.
+
+**NEURON launch campaign (0% fee window):** all 11 locks created for the NEURON team and strategic reserve were made during a **zero-fee window** — `fee_bps = 0` and `fee_ton = 0` were active at the time of creation. Historic locks are **not affected by later fee changes**; their terms were fixed on-chain at creation.
+
 *Currently whitelisted: COGNIQ.*
+
+---
+
+## 🔒 NEURON vesting — live on mainnet
+
+**2 000 000 000 COGNIQ (40% of total supply)** is locked on-chain via this module.
+All tranches are independently verifiable in the block explorer.
+
+| Pool | Amount | Lockups | First unlock | Last unlock | Beneficiary |
+|---|---|---|---|---|---|
+| **Team** | 500 000 000 | 5 × 100M | 2027-10-01 | 2028-10-01 | [`UQAG-6hdu_fOdUE5EUMvBhxjpQrFWutGkBtS0mQfgQ6oGoZa`](https://tonviewer.com/UQAG-6hdu_fOdUE5EUMvBhxjpQrFWutGkBtS0mQfgQ6oGoZa) |
+| **Reserve** | 1 500 000 000 | 6 × 250M | 2028-10-01 | 2031-04-01 | [`UQC4kZ7R86_E37FwN8-46OK1EDccQptSqgOhosOhM4SS-MGP`](https://tonviewer.com/UQC4kZ7R86_E37FwN8-46OK1EDccQptSqgOhosOhM4SS-MGP) |
+| **Total** | **2 000 000 000** | **11 lockups** | — | — | — |
+
+### Team vesting
+
+**Schedule:** 12-month cliff + 5 equal tranches of 100M COGNIQ every 3 months.
+**Start:** 2027-10-01. **End:** 2028-10-01.
+
+| # | Tranche | Amount | Unlock (UTC) | LockupWallet | TX |
+|---|---|---|---|---|---|
+| 1/5 | Team | 100 000 000 | 2027-10-01 | [`EQAYLHKt_XPsXV6dYc55i3E5uSz7U-twpkDJbhFiYUV4X3Nr`](https://tonviewer.com/EQAYLHKt_XPsXV6dYc55i3E5uSz7U-twpkDJbhFiYUV4X3Nr) | [view](https://tonviewer.com/transaction/dad982630afa9eb4d4e787ddd1ea00dd4e99f313fc9111da71551514a224320f) |
+| 2/5 | Team | 100 000 000 | 2028-01-01 | [`EQB0qmIN438QTAIfaUXrXTPbvIGdM2H8Va2Qt1D_nlESEu59`](https://tonviewer.com/EQB0qmIN438QTAIfaUXrXTPbvIGdM2H8Va2Qt1D_nlESEu59) | [view](https://tonviewer.com/transaction/5b96a70d2764d6aef55abebc3c956673fdfc456192b9b46fc70c7eba1739f791) |
+| 3/5 | Team | 100 000 000 | 2028-04-01 | [`EQBNTbN2YuvJfmio4ut-Nb795QX-p_zreq0zt-RueNQ1LPe0`](https://tonviewer.com/EQBNTbN2YuvJfmio4ut-Nb795QX-p_zreq0zt-RueNQ1LPe0) | [view](https://tonviewer.com/transaction/492198ce0bb31355106297587175a16b1db974ca409480817739f6c2fee4b40f) |
+| 4/5 | Team | 100 000 000 | 2028-07-01 | [`EQDHBH9ZYXGMGAnDf1typPqx8V9gSsqt2Q3ZnZDnmcMlr-iN`](https://tonviewer.com/EQDHBH9ZYXGMGAnDf1typPqx8V9gSsqt2Q3ZnZDnmcMlr-iN) | [view](https://tonviewer.com/transaction/816d9b752947eafc863a8e2f094d48eee4f3a00feeca550431c1b4be6dc6891c) |
+| 5/5 | Team | 100 000 000 | 2028-10-01 | [`EQDKK59jBUk_SclAIS16V7vtiuJmnoPhYlpQCnZk81atRNDv`](https://tonviewer.com/EQDKK59jBUk_SclAIS16V7vtiuJmnoPhYlpQCnZk81atRNDv) | [view](https://tonviewer.com/transaction/58a727568496606e01b2d2516134e2fede3698e803f5dab75129519e8eb59737) |
+
+### Reserve vesting
+
+**Schedule:** 24-month cliff + 6 equal tranches of 250M COGNIQ every 6 months.
+**Start:** 2028-10-01. **End:** 2031-04-01.
+
+| # | Tranche | Amount | Unlock (UTC) | LockupWallet | TX |
+|---|---|---|---|---|---|
+| 1/6 | Reserve | 250 000 000 | 2028-10-01 | [`EQBVGx2qsy83Lprt1SZQ5kOleKkla7Kc0wUhN-5lJ7orHBu5`](https://tonviewer.com/EQBVGx2qsy83Lprt1SZQ5kOleKkla7Kc0wUhN-5lJ7orHBu5) | [view](https://tonviewer.com/transaction/0606b74a35b43f8e377ea1c7810dc825dfefb50b04704217f11370a75343cb07) |
+| 2/6 | Reserve | 250 000 000 | 2029-04-01 | [`EQCWgA8seyQ9yfRTufT2CVqQn2xbbUvVqdsDxR0n0Q2pqtKa`](https://tonviewer.com/EQCWgA8seyQ9yfRTufT2CVqQn2xbbUvVqdsDxR0n0Q2pqtKa) | [view](https://tonviewer.com/transaction/6b0bc9eb26ee798d534b441e4bdbed34017fd4ee1bc4eb0752a1c7936de27041) |
+| 3/6 | Reserve | 250 000 000 | 2029-10-01 | [`EQD8ODPSrThFFPTqryj6kM2D7BZuXrQypkg71e0LZAabARRk`](https://tonviewer.com/EQD8ODPSrThFFPTqryj6kM2D7BZuXrQypkg71e0LZAabARRk) | [view](https://tonviewer.com/transaction/a6dfc623bbfeb67dfdd89f06dbd1fc7cf4c5f31f56742f77521371cc1bb06f19) |
+| 4/6 | Reserve | 250 000 000 | 2030-04-01 | [`EQBFm8WVyy3ZvlzizU7ubk0iI34CfdZGwZqDZ5cqxcNWFPQd`](https://tonviewer.com/EQBFm8WVyy3ZvlzizU7ubk0iI34CfdZGwZqDZ5cqxcNWFPQd) | [view](https://tonviewer.com/transaction/3911c877a8f88e95b59dc8af70d49e5ab83eeafd4c4dcb994c5caa7bb0a1e40e) |
+| 5/6 | Reserve | 250 000 000 | 2030-10-01 | [`EQD5JGynzv05BDGgbXt1KuNKMfFP07VWBCuzVby9LidGJYTU`](https://tonviewer.com/EQD5JGynzv05BDGgbXt1KuNKMfFP07VWBCuzVby9LidGJYTU) | [view](https://tonviewer.com/transaction/64e692f75e4378e3f31cd03a65a8eb4c5e284b0e247547b2db1310214afb02fd) |
+| 6/6 | Reserve | 250 000 000 | 2031-04-01 | [`EQBV8EpTZHix8XmC078gTu7Ug-ipg0jFCnxoNfsngpBFtTVN`](https://tonviewer.com/EQBV8EpTZHix8XmC078gTu7Ug-ipg0jFCnxoNfsngpBFtTVN) | [view](https://tonviewer.com/transaction/3c7d5d7a593202c337fd4455e22dd2e75ace68493f4a0a129f63c81bd2759cfd) |
+
+Every lock was created through the same public factory (`EQD_dSnLq…SCTN`) with `opcode 0x31` (`CreateLock`), deploys a fresh `LockupWallet`, and forwards **exactly 100%** of the locked jettons — no platform fee was deducted during the zero-fee campaign window (`fee_bps = 0`, `fee_ton = 0` at the time of creation). Each row is independently verifiable in Tonviewer.
 
 ---
 
@@ -131,6 +189,8 @@ Fees are configuration parameters adjustable by the treasury, not hard-coded byt
 
 Overpay (attach above `fee_ton + GAS_BUFFER_TON`) is refunded to the creator immediately. On a failed deployment the bounce refund returns both the platform fee and the gas buffer.
 
+**NEURON launch campaign:** all 11 locks created for the NEURON team and strategic reserve were made during a **zero-fee window** — `fee_bps = 0` and `fee_ton = 0` were active at the time of creation. The standard fee schedule (`fee_bps = 50` = 0.5% jetton, `fee_ton = 1 TON`) was restored **after** the launch campaign and applies to **all locks created from that point onward**.
+
 ---
 
 ## 🛡️ Trust model
@@ -157,6 +217,7 @@ Overpay (attach above `fee_ton + GAS_BUFFER_TON`) is refunded to the creator imm
 | Mainnet — full lifecycle | TON mainnet | create → funded → claim → settle → destroy · `43da42f2…64319f00` |
 | Mainnet — partial lifecycle | TON mainnet | partial → alive → remainder → destroy · `f25ce1b2…8e30d2ae`, `afc8c488…9b41f110` |
 | Mainnet — single-forward guard | TON mainnet | exactly one forward per lock · `1ff2b7c0…68a65764` |
+| Mainnet — NEURON campaign | TON mainnet | **11 lockups** (team + reserve) created via same factory · **2 000 000 000 COGNIQ** locked, all verifiable on-chain | see [🔒 NEURON vesting — live on mainnet](#-neuron-vesting--live-on-mainnet) |
 
 Full invariant matrix, opcode tables and per-branch coverage ledger: [`docs/SPEC.md`](docs/SPEC.md). Audit reports: [`docs/audit/`](docs/audit/).
 
@@ -197,6 +258,20 @@ npx tsx scripts/add-jetton.ts <JETTON_MASTER_ADDRESS>
 
 Prints a ready-to-sign `SetJettonWallet` body for multisig.ton.org. Sign with 2 of 3 treasury keys. The script is also wired as a manual GitHub Action (`check-jetton.yml`) so the body can be generated in CI without a local toolchain.
 
+### Retune platform fees
+
+```bash
+# Set jetton fee to 0.5% (50 bps)
+FACTORY_ADDRESS=EQD_dSnLqcBiQyT2LRyNPIUpqAY9Qr9VoMgUCKtHN5xpSCTN \
+npx tsx scripts/set-fees.ts --bps=50
+
+# Set fixed TON fee to 1 TON per lock
+FACTORY_ADDRESS=EQD_dSnLqcBiQyT2LRyNPIUpqAY9Qr9VoMgUCKtHN5xpSCTN \
+npx tsx scripts/set-fees.ts --ton=1
+```
+
+Each run prints a ready-to-sign body for `multisig.ton.org`. One mode per run; sign 2-of-3.
+
 ---
 
 ## 📂 Project structure
@@ -213,6 +288,7 @@ tests/
 scripts/
 ├── deploy-mainnet.ts         # Deploy LockupFactory to mainnet
 ├── add-jetton.ts             # Generate SetJettonWallet body for multisig
+├── set-fees.ts               # Generate SetFeeBps / SetFeeTon body for multisig
 └── gen-rescue.ts             # Generate treasury withdraw / rescue orders
 
 bot/
@@ -245,7 +321,8 @@ docs/
 ├── ton-dev-audit.yml         # TON Dev Skills audit on every push
 ├── deploy-mainnet.yml        # Manual factory deployment
 ├── deploy-pages.yml          # Publish mini app to GitHub Pages
-└── check-jetton.yml          # Manual on-chain whitelist body generation
+├── check-jetton.yml          # Manual on-chain whitelist body generation
+└── set-fees.yml              # Manual fee retune body generation
 ```
 
 ---
@@ -284,6 +361,8 @@ Full specification, invariants, opcode tables and verification status per contra
 ## 🗺️ Roadmap
 
 **Shipped (mainnet-verified)**
+- **11 lockups live on TON mainnet** — NEURON team (500M) + reserve (1.5B), **40% of total supply**, all verifiable on-chain. See [🔒 NEURON vesting — live on mainnet](#-neuron-vesting--live-on-mainnet).
+- **Standard fee schedule restored after the launch campaign** — `fee_bps = 50` (0.5%) and `fee_ton = 1 TON` applied via treasury multisig.
 - LockupFactory v5.0.3 + LockupWallet v5.1.1 on TON mainnet
 - COGNIQ whitelisted on-chain via 2-of-3 treasury multisig
 - TEP-89 jetton-wallet discovery (factory + wallet)
